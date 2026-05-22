@@ -297,6 +297,12 @@ BettaFish/
 docker compose up -d
 ```
 
+Compose 会启动三个关键服务：
+
+- `api`：新的 SaaS 服务层，FastAPI/Uvicorn，地址为 `http://localhost:8000/api/v1`。
+- `bettafish`：保留旧 Flask + Streamlit 编排入口，地址为 `http://localhost:5000`。
+- `db`：PostgreSQL，用于 MindSpider/业务数据；SaaS API 的任务与配置元数据默认写入 `./data/saas_api.sqlite3`。
+
 > **注：镜像拉取速度慢**，在原 `docker-compose.yml` 文件中，我们已经通过**注释**的方式提供了备用镜像地址供您替换
 
 ### 2. 配置说明
@@ -438,6 +444,25 @@ python app.py
 > 注2：数据爬取需要单独操作，见6.3指引
 
 访问 http://localhost:5000 即可使用完整系统
+
+#### 6.1.1 SaaS 服务层启动
+
+新的服务层按 `docs/openapi/saas-platform.yaml` 提供版本化 API：
+
+```bash
+uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+本地接口基准地址为 `http://localhost:8000/api/v1`。请求需要携带
+`X-Workspace-Id`，例如：
+
+```bash
+curl -H "X-Workspace-Id: workspace_demo" \
+  http://localhost:8000/api/v1/health
+```
+
+默认不直接执行 LLM 报告和浏览器爬虫任务，只持久化 SaaS 任务生命周期；
+如需本地生成占位报告与事件流，可设置 `BETTAFISH_API_RUN_WORKERS=true`。
 
 #### 6.2 单独启动某个Agent
 

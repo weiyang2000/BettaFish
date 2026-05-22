@@ -1,6 +1,23 @@
 version: "3.9"
 
 services:
+  api:
+    build: .
+    container_name: bettafish-api
+    restart: unless-stopped
+    command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BETTAFISH_API_DB_PATH=/app/data/saas_api.sqlite3
+      - BETTAFISH_API_ARTIFACT_DIR=/app/data/saas_api_artifacts
+      - BETTAFISH_API_RUN_WORKERS=false
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+
   bettafish:
     image: ghcr.io/666ghj/bettafish:latest
     # Speed up mirror

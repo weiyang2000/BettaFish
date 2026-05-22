@@ -15,6 +15,10 @@ downloads/
 eggs/
 .eggs/
 lib/
+!apps/
+!apps/web/
+!apps/web/src/
+!apps/web/src/lib/
 lib64/
 parts/
 sdist/
@@ -147,6 +151,16 @@ cython_debug/
 # macOS
 .DS_Store
 */.DS_Store
+
+# ==== Frontend artifacts ====
+node_modules/
+.next/
+apps/web/.next/
+.playwright-cli/
+output/playwright/
+apps/web/playwright-report/
+apps/web/test-results/
+*.tsbuildinfo
 
 # Windows
 Thumbs.db

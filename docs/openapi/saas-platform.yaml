@@ -1,0 +1,1630 @@
+openapi: 3.1.0
+info:
+  title: BettaFish SaaS Platform API
+  version: 0.1.0
+  summary: Contract for the BettaFish SaaS service layer.
+  description: |
+    This contract is the target API for the Next.js SaaS console. It intentionally
+    does not mirror the legacy Flask + Streamlit routes one-for-one. Backend
+    implementations may adapt existing endpoints such as `/api/status`,
+    `/api/config`, `/api/search`, and `/api/report/*`, but the frontend should
+    call the versioned SaaS resources below.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local backend service
+  - url: https://api.bettafish.example.com/api/v1
+    description: SaaS deployment placeholder
+security:
+  - bearerAuth: []
+tags:
+  - name: System
+    description: System health, component runtime state, logs, and service config.
+  - name: Reports
+    description: Multi-agent report task lifecycle, streaming progress, results, and exports.
+  - name: Crawlers
+    description: MindSpider crawling tasks and reusable crawl strategies.
+  - name: Platforms
+    description: Platform metadata and user identity allow/block list management.
+  - name: Search
+    description: Cross-engine query dispatch used by report preparation.
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Get service health and tenant context.
+      operationId: getHealth
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Service health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /system/components:
+    get:
+      tags: [System]
+      summary: List engine component runtime states.
+      operationId: listSystemComponents
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Component states.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemComponentsResponse"
+
+  /system/components/{componentId}:start:
+    post:
+      tags: [System]
+      summary: Start a component.
+      operationId: startSystemComponent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ComponentId"
+      responses:
+        "202":
+          description: Start requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentActionResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /system/components/{componentId}:stop:
+    post:
+      tags: [System]
+      summary: Stop a component.
+      operationId: stopSystemComponent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ComponentId"
+      responses:
+        "202":
+          description: Stop requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentActionResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /system/config:
+    get:
+      tags: [System]
+      summary: Read system configuration with sensitive values masked.
+      operationId: getSystemConfig
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: includeSchema
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: Masked config values and editable field metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemConfigResponse"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [System]
+      summary: Update system configuration.
+      description: |
+        Sensitive fields may be omitted to keep current values. A masked value
+        such as `********` must be ignored by the backend and never persisted as
+        the real secret.
+      operationId: updateSystemConfig
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SystemConfigUpdateRequest"
+            examples:
+              updateSearchProvider:
+                value:
+                  updatedBy:
+                    userId: user_demo
+                    displayName: Demo Operator
+                  values:
+                    SEARCH_TOOL_TYPE: BochaAPI
+                    BOCHA_WEB_SEARCH_API_KEY: sk-new-value
+      responses:
+        "200":
+          description: Updated masked config.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemConfigResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /logs:
+    get:
+      tags: [System]
+      summary: Read runtime logs.
+      operationId: listLogs
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: source
+          in: query
+          schema:
+            $ref: "#/components/schemas/LogSource"
+        - name: level
+          in: query
+          schema:
+            $ref: "#/components/schemas/LogLevel"
+        - name: tail
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+            default: 300
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Log lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogsResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /search:
+    post:
+      tags: [Search]
+      summary: Dispatch a query to selected engines.
+      operationId: createSearchRun
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRunRequest"
+      responses:
+        "202":
+          description: Search run accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchRunResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /report-templates:
+    get:
+      tags: [Reports]
+      summary: List report templates.
+      operationId: listReportTemplates
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Report templates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTemplatesResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /report-tasks:
+    get:
+      tags: [Reports]
+      summary: List report tasks.
+      operationId: listReportTasks
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskStatusFilter"
+        - $ref: "#/components/parameters/PageToken"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Report task page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTaskListResponse"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Reports]
+      summary: Create a report generation task.
+      operationId: createReportTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReportTaskRequest"
+            examples:
+              policyTopic:
+                value:
+                  topic: 养老服务发展趋势
+                  templateId: daily-monitoring
+                  sourceScope:
+                    searchRunId: search_20260522_001
+                    includeForumLog: true
+                  outputFormats: [html, md, pdf]
+                  owner:
+                    userId: user_demo
+                    displayName: Demo Operator
+      responses:
+        "202":
+          description: Task accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /report-tasks/{taskId}:
+    get:
+      tags: [Reports]
+      summary: Get a report task.
+      operationId: getReportTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Report task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /report-tasks/{taskId}/events:
+    get:
+      tags: [Reports]
+      summary: Stream report task progress with Server-Sent Events.
+      operationId: streamReportTaskEvents
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: string
+          description: Optional SSE resume cursor.
+      responses:
+        "200":
+          description: SSE stream of ReportTaskEvent messages.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                progress:
+                  summary: Progress event
+                  value: |
+                    id: 17
+                    event: progress
+                    data: {"id":"17","type":"progress","taskId":"report_001","timestamp":"2026-05-22T10:10:00Z","payload":{"status":"running","progress":52,"stage":"agent_running","message":"Generating chapter 3"}}
+
+  /report-tasks/{taskId}:cancel:
+    post:
+      tags: [Reports]
+      summary: Cancel a running report task.
+      operationId: cancelReportTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "202":
+          description: Cancel accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /report-tasks/{taskId}/result:
+    get:
+      tags: [Reports]
+      summary: Get report result metadata and preview URL.
+      operationId: getReportResult
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Report result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResultResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /report-tasks/{taskId}/exports/{format}:
+    get:
+      tags: [Reports]
+      summary: Download or create an exported report artifact.
+      operationId: exportReport
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+        - name: format
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ReportFormat"
+        - name: optimizeLayout
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Applies to PDF exports.
+      responses:
+        "200":
+          description: Export file stream.
+          content:
+            text/html:
+              schema:
+                type: string
+            text/markdown:
+              schema:
+                type: string
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "202":
+          description: Export is queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportExportJobResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /crawler-strategies:
+    get:
+      tags: [Crawlers]
+      summary: List reusable crawler strategies.
+      operationId: listCrawlerStrategies
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Strategy list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerStrategyListResponse"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Crawlers]
+      summary: Create a crawler strategy.
+      operationId: createCrawlerStrategy
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrawlerStrategyInput"
+            examples:
+              wbStrategy:
+                summary: Preserve a platform-bound Weibo policy.
+                value:
+                  name: 微博每日采集
+                  runMode: deep_sentiment
+                  platformPolicies:
+                    - platformId: wb
+                      enabled: true
+                      crawlDepth: 3
+                      maxKeywords: 10
+                      maxNotesPerKeyword: 20
+                      maxCommentsPerNote: 50
+                      keywords: [养老服务, 医保]
+                      keywordSource: manual
+                      frequency:
+                        mode: daily
+                        timezone: Asia/Shanghai
+                      loginType: qrcode
+                      headless: true
+      responses:
+        "201":
+          description: Strategy created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerStrategyResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /crawler-tasks:
+    get:
+      tags: [Crawlers]
+      summary: List crawler tasks.
+      operationId: listCrawlerTasks
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskStatusFilter"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/PlatformId"
+        - $ref: "#/components/parameters/PageToken"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Crawler task page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerTaskListResponse"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Crawlers]
+      summary: Create a crawler task.
+      operationId: createCrawlerTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCrawlerTaskRequest"
+            examples:
+              dailyCrawl:
+                value:
+                  strategyId: strategy_daily_hot_topics
+                  runMode: full_workflow
+                  targetDate: "2026-05-22"
+                  platforms: [wb, xhs, zhihu]
+                  owner:
+                    userId: user_demo
+                    displayName: Demo Operator
+      responses:
+        "202":
+          description: Task accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /crawler-tasks/{taskId}:
+    get:
+      tags: [Crawlers]
+      summary: Get a crawler task.
+      operationId: getCrawlerTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Crawler task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /crawler-tasks/{taskId}:stop:
+    post:
+      tags: [Crawlers]
+      summary: Stop a crawler task.
+      operationId: stopCrawlerTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "202":
+          description: Stop accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /crawler-tasks/{taskId}:retry:
+    post:
+      tags: [Crawlers]
+      summary: Retry a failed or stopped crawler task.
+      operationId: retryCrawlerTask
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "202":
+          description: Retry accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerTaskResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /platforms:
+    get:
+      tags: [Platforms]
+      summary: List supported crawling platforms.
+      operationId: listPlatforms
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Platform list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformListResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /platforms/{platformId}/policy:
+    get:
+      tags: [Platforms]
+      summary: Get platform crawling policy.
+      operationId: getPlatformPolicy
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PlatformId"
+      responses:
+        "200":
+          description: Platform policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformPolicyResponse"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [Platforms]
+      summary: Replace platform crawling policy.
+      operationId: updatePlatformPolicy
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PlatformId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlatformPolicyInput"
+      responses:
+        "200":
+          description: Updated policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformPolicyResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /platforms/{platformId}/identity-lists:
+    get:
+      tags: [Platforms]
+      summary: List allow/block user identities for a platform.
+      operationId: listPlatformIdentityRules
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PlatformId"
+        - name: listType
+          in: query
+          schema:
+            $ref: "#/components/schemas/IdentityListType"
+      responses:
+        "200":
+          description: Identity list rules.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityRulesResponse"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [Platforms]
+      summary: Add an identity allow/block rule.
+      operationId: createPlatformIdentityRule
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PlatformId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityRuleInput"
+      responses:
+        "201":
+          description: Rule created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityRuleResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /platforms/{platformId}/identity-lists/{ruleId}:
+    delete:
+      tags: [Platforms]
+      summary: Delete an identity allow/block rule.
+      operationId: deletePlatformIdentityRule
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PlatformId"
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Rule deleted.
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    WorkspaceId:
+      name: X-Workspace-Id
+      in: header
+      required: true
+      description: Tenant/workspace scope for all SaaS resources.
+      schema:
+        type: string
+        example: workspace_demo
+    PageToken:
+      name: pageToken
+      in: query
+      schema:
+        type: string
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+    TaskStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/TaskStatus"
+    ComponentId:
+      name: componentId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ComponentId"
+    PlatformId:
+      name: platformId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/PlatformId"
+
+  responses:
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    WorkspaceScoped:
+      type: object
+      required: [workspaceId]
+      properties:
+        workspaceId:
+          type: string
+        tenantId:
+          type: string
+          description: Optional parent tenant/organization id.
+
+    UserRef:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [owner, operator, reviewer, service_account]
+
+    TaskStatus:
+      type: string
+      enum: [queued, pending, running, succeeded, failed, cancelled, stopping, stopped]
+
+    ReportStatus:
+      type: string
+      enum: [queued, pending, running, succeeded, failed, cancelled]
+
+    CrawlerStatus:
+      type: string
+      enum: [queued, pending, running, succeeded, failed, stopping, stopped, cancelled]
+
+    ComponentId:
+      type: string
+      enum: [query, media, insight, forum, report, mindspider, database]
+
+    ComponentStatus:
+      type: string
+      enum: [unknown, stopped, starting, running, degraded, failed, stopping]
+
+    PlatformId:
+      type: string
+      enum: [xhs, dy, ks, bili, wb, tieba, zhihu]
+
+    ReportFormat:
+      type: string
+      enum: [html, json, md, pdf]
+
+    LogSource:
+      type: string
+      enum: [system, query, media, insight, forum, report, mindspider, crawler]
+
+    LogLevel:
+      type: string
+      enum: [debug, info, warning, error, critical]
+
+    IdentityListType:
+      type: string
+      enum: [allow, block]
+
+    ApiErrorCode:
+      type: string
+      enum:
+        - BAD_REQUEST
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - CONFLICT
+        - VALIDATION_ERROR
+        - ENGINE_NOT_READY
+        - TASK_ALREADY_RUNNING
+        - TASK_NOT_CANCELLABLE
+        - EXPORT_UNAVAILABLE
+        - DEPENDENCY_MISSING
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              $ref: "#/components/schemas/ApiErrorCode"
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            requestId:
+              type: string
+
+    HealthResponse:
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceScoped"
+        - type: object
+          required: [success, status, serverTime, version]
+          properties:
+            success:
+              type: boolean
+              const: true
+            status:
+              type: string
+              enum: [ok, degraded, unavailable]
+            serverTime:
+              type: string
+              format: date-time
+            version:
+              type: string
+            currentUser:
+              $ref: "#/components/schemas/UserRef"
+
+    SystemComponent:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          $ref: "#/components/schemas/ComponentId"
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ComponentStatus"
+        port:
+          type: integer
+        healthUrl:
+          type: string
+        outputLines:
+          type: integer
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+
+    SystemComponentsResponse:
+      type: object
+      required: [success, components]
+      properties:
+        success:
+          type: boolean
+          const: true
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/SystemComponent"
+
+    ComponentActionResponse:
+      type: object
+      required: [success, component]
+      properties:
+        success:
+          type: boolean
+          const: true
+        component:
+          $ref: "#/components/schemas/SystemComponent"
+        message:
+          type: string
+
+    ConfigFieldType:
+      type: string
+      enum: [string, number, boolean, enum, secret, url]
+
+    SystemConfigField:
+      type: object
+      required: [key, label, type, value, editable, sensitive]
+      properties:
+        key:
+          type: string
+          example: REPORT_ENGINE_API_KEY
+        label:
+          type: string
+        group:
+          type: string
+          enum: [server, database, llm, search, crawler]
+        type:
+          $ref: "#/components/schemas/ConfigFieldType"
+        value:
+          type: string
+          description: Secret values must be masked, for example `********`.
+        editable:
+          type: boolean
+        sensitive:
+          type: boolean
+        required:
+          type: boolean
+        options:
+          type: array
+          items:
+            type: string
+        validation:
+          type: object
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+            pattern:
+              type: string
+        lastUpdatedAt:
+          type: string
+          format: date-time
+
+    SystemConfigResponse:
+      type: object
+      required: [success, fields]
+      properties:
+        success:
+          type: boolean
+          const: true
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/SystemConfigField"
+        updatedAt:
+          type: string
+          format: date-time
+
+    SystemConfigUpdateRequest:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: number
+              - type: boolean
+              - type: "null"
+        updatedBy:
+          $ref: "#/components/schemas/UserRef"
+
+    LogLine:
+      type: object
+      required: [id, source, level, timestamp, message]
+      properties:
+        id:
+          type: string
+        source:
+          $ref: "#/components/schemas/LogSource"
+        level:
+          $ref: "#/components/schemas/LogLevel"
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        taskId:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    LogsResponse:
+      type: object
+      required: [success, lines]
+      properties:
+        success:
+          type: boolean
+          const: true
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogLine"
+        nextCursor:
+          type: string
+
+    SearchRunRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+        engines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComponentId"
+          default: [query, media, insight, forum]
+        owner:
+          $ref: "#/components/schemas/UserRef"
+
+    SearchRun:
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceScoped"
+        - type: object
+          required: [id, query, status, engines, createdAt]
+          properties:
+            id:
+              type: string
+            query:
+              type: string
+            status:
+              $ref: "#/components/schemas/TaskStatus"
+            engines:
+              type: array
+              items:
+                $ref: "#/components/schemas/ComponentId"
+            createdAt:
+              type: string
+              format: date-time
+            owner:
+              $ref: "#/components/schemas/UserRef"
+
+    SearchRunResponse:
+      type: object
+      required: [success, run]
+      properties:
+        success:
+          type: boolean
+          const: true
+        run:
+          $ref: "#/components/schemas/SearchRun"
+
+    ReportTemplate:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        filename:
+          type: string
+        description:
+          type: string
+        sizeBytes:
+          type: integer
+
+    ReportTemplatesResponse:
+      type: object
+      required: [success, templates]
+      properties:
+        success:
+          type: boolean
+          const: true
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportTemplate"
+
+    ReportSourceScope:
+      type: object
+      properties:
+        searchRunId:
+          type: string
+        crawlerTaskIds:
+          type: array
+          items:
+            type: string
+        includeForumLog:
+          type: boolean
+          default: true
+        inputFileRefs:
+          type: array
+          items:
+            type: string
+
+    CreateReportTaskRequest:
+      type: object
+      required: [topic]
+      properties:
+        topic:
+          type: string
+          minLength: 1
+        templateId:
+          type: string
+        customTemplate:
+          type: string
+        sourceScope:
+          $ref: "#/components/schemas/ReportSourceScope"
+        outputFormats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportFormat"
+          default: [html]
+        owner:
+          $ref: "#/components/schemas/UserRef"
+
+    ReportTask:
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceScoped"
+        - type: object
+          required: [id, topic, status, progress, createdAt, updatedAt]
+          properties:
+            id:
+              type: string
+            legacyTaskId:
+              type: string
+              description: Optional old `/api/report/*` task id while migration is in progress.
+            topic:
+              type: string
+            status:
+              $ref: "#/components/schemas/ReportStatus"
+            progress:
+              type: integer
+              minimum: 0
+              maximum: 100
+            stage:
+              type: string
+              enum: [queued, prepare, io_ready, data_loaded, agent_running, retry_wait, persist, completed, failed]
+            templateId:
+              type: string
+            sourceScope:
+              $ref: "#/components/schemas/ReportSourceScope"
+            artifacts:
+              type: array
+              items:
+                $ref: "#/components/schemas/ReportArtifact"
+            error:
+              $ref: "#/components/schemas/ErrorResponse"
+            owner:
+              $ref: "#/components/schemas/UserRef"
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+
+    ReportArtifact:
+      type: object
+      required: [format, ready]
+      properties:
+        format:
+          $ref: "#/components/schemas/ReportFormat"
+        ready:
+          type: boolean
+        filename:
+          type: string
+        sizeBytes:
+          type: integer
+        downloadUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    ReportTaskResponse:
+      type: object
+      required: [success, task]
+      properties:
+        success:
+          type: boolean
+          const: true
+        task:
+          $ref: "#/components/schemas/ReportTask"
+        eventStreamUrl:
+          type: string
+
+    ReportTaskListResponse:
+      type: object
+      required: [success, tasks]
+      properties:
+        success:
+          type: boolean
+          const: true
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportTask"
+        nextPageToken:
+          type: string
+
+    ReportTaskEvent:
+      type: object
+      required: [id, type, taskId, timestamp, payload]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [status, progress, stage, log, warning, html_ready, completed, error, cancelled, heartbeat]
+        taskId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+
+    ReportResultResponse:
+      type: object
+      required: [success, taskId, htmlPreviewUrl, artifacts]
+      properties:
+        success:
+          type: boolean
+          const: true
+        taskId:
+          type: string
+        htmlPreviewUrl:
+          type: string
+        htmlContent:
+          type: string
+          description: Optional inline HTML for trusted internal previews.
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportArtifact"
+
+    ReportExportJobResponse:
+      type: object
+      required: [success, exportJobId, status]
+      properties:
+        success:
+          type: boolean
+          const: true
+        exportJobId:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+
+    CrawlerRunMode:
+      type: string
+      enum: [topic_extraction, deep_sentiment, full_workflow]
+
+    CrawlFrequency:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [manual, hourly, daily, weekly, cron]
+        cron:
+          type: string
+        timezone:
+          type: string
+          default: Asia/Shanghai
+
+    PlatformPolicyInput:
+      type: object
+      required: [enabled, crawlDepth, keywords, maxCommentsPerNote, frequency]
+      properties:
+        enabled:
+          type: boolean
+        crawlDepth:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Logical crawl depth for platform-specific adapters.
+        maxKeywords:
+          type: integer
+          minimum: 1
+          maximum: 500
+        maxNotesPerKeyword:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        maxCommentsPerNote:
+          type: integer
+          minimum: 0
+          maximum: 5000
+        keywords:
+          type: array
+          items:
+            type: string
+        keywordSource:
+          type: string
+          enum: [manual, broad_topic_extraction, mixed]
+        frequency:
+          $ref: "#/components/schemas/CrawlFrequency"
+        loginType:
+          type: string
+          enum: [qrcode, phone, cookie]
+        headless:
+          type: boolean
+
+    PlatformPolicy:
+      allOf:
+        - $ref: "#/components/schemas/PlatformPolicyInput"
+        - type: object
+          required: [platformId, updatedAt]
+          properties:
+            platformId:
+              $ref: "#/components/schemas/PlatformId"
+            updatedAt:
+              type: string
+              format: date-time
+            updatedBy:
+              $ref: "#/components/schemas/UserRef"
+
+    StrategyPlatformPolicyInput:
+      allOf:
+        - type: object
+          required: [platformId]
+          properties:
+            platformId:
+              $ref: "#/components/schemas/PlatformId"
+        - $ref: "#/components/schemas/PlatformPolicyInput"
+
+    PlatformPolicyResponse:
+      type: object
+      required: [success, policy]
+      properties:
+        success:
+          type: boolean
+          const: true
+        policy:
+          $ref: "#/components/schemas/PlatformPolicy"
+
+    CrawlerStrategyInput:
+      type: object
+      required: [name, runMode, platformPolicies]
+      properties:
+        name:
+          type: string
+        runMode:
+          $ref: "#/components/schemas/CrawlerRunMode"
+        platformPolicies:
+          type: array
+          items:
+            $ref: "#/components/schemas/StrategyPlatformPolicyInput"
+        owner:
+          $ref: "#/components/schemas/UserRef"
+
+    CrawlerStrategy:
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceScoped"
+        - type: object
+          required: [id, name, runMode, platformPolicies, createdAt, updatedAt]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            runMode:
+              $ref: "#/components/schemas/CrawlerRunMode"
+            platformPolicies:
+              type: array
+              items:
+                $ref: "#/components/schemas/PlatformPolicy"
+            owner:
+              $ref: "#/components/schemas/UserRef"
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+
+    CrawlerStrategyResponse:
+      type: object
+      required: [success, strategy]
+      properties:
+        success:
+          type: boolean
+          const: true
+        strategy:
+          $ref: "#/components/schemas/CrawlerStrategy"
+
+    CrawlerStrategyListResponse:
+      type: object
+      required: [success, strategies]
+      properties:
+        success:
+          type: boolean
+          const: true
+        strategies:
+          type: array
+          items:
+            $ref: "#/components/schemas/CrawlerStrategy"
+
+    CreateCrawlerTaskRequest:
+      type: object
+      required: [runMode, platforms]
+      properties:
+        strategyId:
+          type: string
+        runMode:
+          $ref: "#/components/schemas/CrawlerRunMode"
+        targetDate:
+          type: string
+          format: date
+        platforms:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PlatformId"
+        overrides:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformPolicyInput"
+        owner:
+          $ref: "#/components/schemas/UserRef"
+
+    CrawlerTask:
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceScoped"
+        - type: object
+          required: [id, runMode, status, progress, platforms, createdAt, updatedAt]
+          properties:
+            id:
+              type: string
+            runMode:
+              $ref: "#/components/schemas/CrawlerRunMode"
+            status:
+              $ref: "#/components/schemas/CrawlerStatus"
+            progress:
+              type: integer
+              minimum: 0
+              maximum: 100
+            strategyId:
+              type: string
+            targetDate:
+              type: string
+              format: date
+            platforms:
+              type: array
+              items:
+                $ref: "#/components/schemas/PlatformId"
+            stats:
+              $ref: "#/components/schemas/CrawlerStats"
+            error:
+              $ref: "#/components/schemas/ErrorResponse"
+            owner:
+              $ref: "#/components/schemas/UserRef"
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+
+    CrawlerStats:
+      type: object
+      properties:
+        totalKeywords:
+          type: integer
+        totalPlatforms:
+          type: integer
+        totalTasks:
+          type: integer
+        successfulTasks:
+          type: integer
+        failedTasks:
+          type: integer
+        totalNotes:
+          type: integer
+        totalComments:
+          type: integer
+        platformSummary:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              successfulKeywords:
+                type: integer
+              failedKeywords:
+                type: integer
+              totalNotes:
+                type: integer
+              totalComments:
+                type: integer
+
+    CrawlerTaskResponse:
+      type: object
+      required: [success, task]
+      properties:
+        success:
+          type: boolean
+          const: true
+        task:
+          $ref: "#/components/schemas/CrawlerTask"
+
+    CrawlerTaskListResponse:
+      type: object
+      required: [success, tasks]
+      properties:
+        success:
+          type: boolean
+          const: true
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CrawlerTask"
+        nextPageToken:
+          type: string
+
+    Platform:
+      type: object
+      required: [id, name, enabled]
+      properties:
+        id:
+          $ref: "#/components/schemas/PlatformId"
+        name:
+          type: string
+        enabled:
+          type: boolean
+        crawlerType:
+          type: string
+          enum: [search, detail, creator]
+        policy:
+          $ref: "#/components/schemas/PlatformPolicy"
+        identityRuleCounts:
+          type: object
+          properties:
+            allow:
+              type: integer
+            block:
+              type: integer
+
+    PlatformListResponse:
+      type: object
+      required: [success, platforms]
+      properties:
+        success:
+          type: boolean
+          const: true
+        platforms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Platform"
+
+    IdentityRuleInput:
+      type: object
+      required: [listType, userId]
+      properties:
+        listType:
+          $ref: "#/components/schemas/IdentityListType"
+        userId:
+          type: string
+        label:
+          type: string
+        reason:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        createdBy:
+          $ref: "#/components/schemas/UserRef"
+
+    IdentityRule:
+      allOf:
+        - $ref: "#/components/schemas/IdentityRuleInput"
+        - type: object
+          required: [id, platformId, createdAt]
+          properties:
+            id:
+              type: string
+            platformId:
+              $ref: "#/components/schemas/PlatformId"
+            createdAt:
+              type: string
+              format: date-time
+
+    IdentityRuleResponse:
+      type: object
+      required: [success, rule]
+      properties:
+        success:
+          type: boolean
+          const: true
+        rule:
+          $ref: "#/components/schemas/IdentityRule"
+
+    IdentityRulesResponse:
+      type: object
+      required: [success, rules]
+      properties:
+        success:
+          type: boolean
+          const: true
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/IdentityRule"

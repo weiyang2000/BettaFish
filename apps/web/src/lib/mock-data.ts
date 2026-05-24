@@ -2,6 +2,7 @@ import type {
   ComponentStatus,
   ConfigField,
   ConsoleSnapshot,
+  CrawlerAccount,
   CrawlerStrategy,
   CrawlerTask,
   IdentityRule,
@@ -201,6 +202,8 @@ export const crawlerTasks: CrawlerTask[] = [
     strategyId: "strategy_daily_hot_topics",
     targetDate: "2026-05-22",
     platforms: ["wb", "xhs", "zhihu"],
+    keywords: ["养老服务", "医保支付", "养老院"],
+    keywordSource: "manual",
     stats: {
       totalKeywords: 72,
       totalPlatforms: 3,
@@ -226,6 +229,8 @@ export const crawlerTasks: CrawlerTask[] = [
     strategyId: "strategy_brand_watch",
     targetDate: "2026-05-22",
     platforms: ["dy", "bili"],
+    keywords: ["AI 教育硬件", "学习机口碑"],
+    keywordSource: "manual",
     stats: {
       totalKeywords: 24,
       totalPlatforms: 2,
@@ -241,6 +246,67 @@ export const crawlerTasks: CrawlerTask[] = [
     },
     createdAt: "2026-05-22T09:05:00Z",
     updatedAt: "2026-05-22T09:44:00Z"
+  }
+];
+
+export const crawlerAccounts: CrawlerAccount[] = [
+  {
+    id: "acct_wb_ops",
+    workspaceId: WORKSPACE_ID,
+    platformId: "wb",
+    accountId: "wb_1088",
+    status: "active",
+    username: "bettafish_ops",
+    displayName: "BettaFish 运营号",
+    avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=BettaFish%20WB",
+    profileUrl: "https://weibo.com/u/wb_1088",
+    loginType: "qrcode",
+    lastLoginAt: "2026-05-22T08:20:00Z",
+    lastCheckedAt: "2026-05-22T08:30:00Z",
+    createdAt: "2026-05-18T02:00:00Z",
+    updatedAt: "2026-05-22T08:30:00Z",
+    details: {
+      scopes: ["search", "detail"],
+      message: "账号可用于搜索和评论采集。"
+    }
+  },
+  {
+    id: "acct_xhs_research",
+    workspaceId: WORKSPACE_ID,
+    platformId: "xhs",
+    accountId: "xhs_7621",
+    status: "login_required",
+    username: "research_xhs",
+    displayName: "研究采集号",
+    avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=XHS%20Research",
+    loginType: "phone",
+    lastLoginAt: "2026-05-21T07:10:00Z",
+    lastCheckedAt: "2026-05-22T07:10:00Z",
+    createdAt: "2026-05-19T08:00:00Z",
+    updatedAt: "2026-05-22T07:10:00Z",
+    details: {
+      scopes: ["search"],
+      message: "等待下一次验证码校验，不包含任何登录凭证。"
+    }
+  },
+  {
+    id: "acct_dy_session",
+    workspaceId: WORKSPACE_ID,
+    platformId: "dy",
+    accountId: "dy_3390",
+    status: "expired",
+    username: "dy_monitor",
+    displayName: "短视频监测",
+    avatarUrl: "https://api.dicebear.com/9.x/initials/svg?seed=DY%20Monitor",
+    loginType: "cookie",
+    lastLoginAt: "2026-05-18T16:00:00Z",
+    lastCheckedAt: "2026-05-20T16:00:00Z",
+    createdAt: "2026-05-18T08:00:00Z",
+    updatedAt: "2026-05-20T16:00:00Z",
+    details: {
+      scopes: ["search", "detail"],
+      message: "登录状态已过期，请在安全后台重新校验。"
+    }
   }
 ];
 
@@ -562,6 +628,7 @@ export function getMockSnapshot(): ConsoleSnapshot {
     reportTemplates,
     crawlerTasks,
     crawlerStrategies,
+    crawlerAccounts,
     platforms,
     identityRules,
     configFields,

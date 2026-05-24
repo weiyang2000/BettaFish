@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from apps.api.schemas import (
     ApiError,
+    CrawlerAccountUpsertRequest,
     CreateCrawlerTaskRequest,
     CreateReportTaskRequest,
     CrawlerStrategyInput,
@@ -20,6 +21,7 @@ from apps.api.schemas import (
     SearchRunRequest,
     SystemConfigUpdateRequest,
 )
+from apps.api.services.accounts import AccountService
 from apps.api.services.common import utc_now
 from apps.api.services.configuration import ConfigurationService
 from apps.api.services.engines import EngineFacade
@@ -48,6 +50,7 @@ def create_app(
     )
 
     store = Store(db)
+    account_service = AccountService(store)
     app = FastAPI(
         title="BettaFish SaaS Platform API",
         version="0.1.0",
@@ -56,7 +59,8 @@ def create_app(
     )
     app.state.store = store
     app.state.config_service = ConfigurationService(store)
-    app.state.platform_service = PlatformService(store)
+    app.state.account_service = account_service
+    app.state.platform_service = PlatformService(store, account_service)
     app.state.task_service = TaskService(store, artifacts, workers_enabled)
     app.state.engine_facade = EngineFacade(root)
 
@@ -321,6 +325,36 @@ def build_router() -> APIRouter:
     ) -> dict[str, Any]:
         strategy = request.app.state.task_service.create_crawler_strategy(workspace_id, payload)
         return {"success": True, "strategy": strategy}
+
+    @router.get("/crawler-accounts")
+    def list_crawler_accounts(
+        request: Request,
+        workspace_id: str = Depends(workspace_header),
+        platform: str | None = None,
+        status: str | None = None,
+        page_size: int = Query(50, alias="pageSize", ge=1, le=200),
+    ) -> dict[str, Any]:
+        accounts = request.app.state.account_service.list_accounts(
+            workspace_id,
+            platform,
+            status,
+            page_size,
+        )
+        return {"success": True, "accounts": accounts}
+
+    @router.put("/crawler-accounts/{accountId}")
+    def upsert_crawler_account(
+        accountId: str,
+        payload: CrawlerAccountUpsertRequest,
+        request: Request,
+        workspace_id: str = Depends(workspace_header),
+    ) -> dict[str, Any]:
+        account = request.app.state.account_service.upsert_account(
+            workspace_id,
+            accountId,
+            payload,
+        )
+        return {"success": True, "account": account}
 
     @router.get("/crawler-tasks")
     def list_crawler_tasks(

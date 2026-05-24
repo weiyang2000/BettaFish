@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 from apps.api.schemas import ApiError, IdentityRuleInput, PLATFORM_IDS, PlatformPolicyInput
+from apps.api.services.accounts import AccountService
 from apps.api.services.common import new_id, utc_now
 from apps.api.storage import Store, dumps, loads
 
@@ -35,8 +36,9 @@ def default_policy(platform_id: str, updated_at: str | None = None) -> dict[str,
 
 
 class PlatformService:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, account_service: AccountService | None = None):
         self.store = store
+        self.account_service = account_service
 
     def ensure_platform(self, platform_id: str) -> None:
         if platform_id not in PLATFORM_IDS:
@@ -56,9 +58,22 @@ class PlatformService:
                 "crawlerType": "search",
                 "policy": self.get_policy(workspace_id, platform_id),
                 "identityRuleCounts": self.identity_counts(workspace_id, platform_id),
+                "accountCounts": self.account_counts(workspace_id, platform_id),
             }
             for platform_id in PLATFORM_IDS
         ]
+
+    def account_counts(self, workspace_id: str, platform_id: str) -> dict[str, int]:
+        if not self.account_service:
+            return {
+                "active": 0,
+                "loginRequired": 0,
+                "expired": 0,
+                "disabled": 0,
+                "error": 0,
+                "unknown": 0,
+            }
+        return self.account_service.account_counts(workspace_id, platform_id)
 
     def get_policy(self, workspace_id: str, platform_id: str) -> dict[str, Any]:
         self.ensure_platform(platform_id)
@@ -276,4 +291,3 @@ class PlatformService:
     def _optional_user(key: str, value: str | None) -> dict[str, Any]:
         user = loads(value, None)
         return {key: user} if user else {}
-

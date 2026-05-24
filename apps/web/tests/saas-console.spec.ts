@@ -45,16 +45,42 @@ test("validates crawler platform selection and creates a crawler task", async ({
   await openConsole(page);
   await page.getByRole("button", { name: "爬虫" }).click();
 
-  for (const platformName of ["微博", "小红书", "知乎"]) {
-    await page.getByLabel(platformName).uncheck();
-  }
+  await expect(page.getByRole("heading", { name: "爬虫账号" })).toBeVisible();
+  await expect(page.getByText("BettaFish 运营号")).toBeVisible();
+  await expect(page.getByText("研究采集号")).toBeVisible();
+
+  await page.getByLabel("微博").uncheck();
 
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByText("至少选择一个平台")).toBeVisible();
 
   await page.getByLabel("微博").check();
+  await page.getByPlaceholder("每行一个关键词").fill("");
+  await page.getByRole("button", { name: "创建任务" }).click();
+  await expect(page.getByText("至少输入一个关键词")).toBeVisible();
+
+  await page.getByPlaceholder("每行一个关键词").fill("养老服务\n医保支付");
   await page.getByRole("button", { name: "创建任务" }).click();
   await expect(page.getByText("爬虫任务已创建")).toBeVisible();
+  await expect(page.getByText("养老服务 / 医保支付", { exact: true })).toBeVisible();
+});
+
+test("filters crawler accounts by platform and status with empty state", async ({ page }) => {
+  await openConsole(page);
+  await page.getByRole("button", { name: "爬虫" }).click();
+
+  await expect(page.getByText("3 / 3 个账号")).toBeVisible();
+  await page.getByLabel("账号平台筛选").selectOption("xhs");
+  await expect(page.getByText("1 / 3 个账号")).toBeVisible();
+  await expect(page.getByText("研究采集号")).toBeVisible();
+  await expect(page.getByText("BettaFish 运营号")).toHaveCount(0);
+
+  await page.getByLabel("账号状态筛选").selectOption("active");
+  await expect(page.getByText("暂无爬虫账号")).toBeVisible();
+
+  await page.getByLabel("账号平台筛选").selectOption("all");
+  await page.getByLabel("账号状态筛选").selectOption("expired");
+  await expect(page.getByText("短视频监测")).toBeVisible();
 });
 
 test("validates identity list input and adds a platform rule", async ({ page }) => {

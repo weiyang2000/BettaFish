@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -112,6 +113,79 @@ def test_platform_policy_update_round_trip(client: TestClient):
     assert policy["keywords"] == ["养老服务", "医保"]
 
 
+def test_crawler_accounts_list_filters_without_sensitive_credentials(client: TestClient):
+    upsert = client.put(
+        "/api/v1/crawler-accounts/wb_1088",
+        headers=WORKSPACE_HEADERS,
+        json={
+            "platformId": "wb",
+            "username": "bettafish_ops",
+            "displayName": "BettaFish 运营号",
+            "status": "active",
+            "loginType": "qrcode",
+            "lastCheckedAt": "2026-05-22T08:30:00Z",
+            "details": {
+                "message": "账号可用于搜索和评论采集。",
+                "accessToken": "not-allowed",
+                "nested": {"cookie": "not-allowed", "safe": "kept"},
+            },
+        },
+    )
+    assert upsert.status_code == 200
+
+    response = client.get("/api/v1/crawler-accounts?platform=wb", headers=WORKSPACE_HEADERS)
+    assert response.status_code == 200
+
+    accounts = response.json()["accounts"]
+    assert accounts
+    assert {account["platformId"] for account in accounts} == {"wb"}
+    account = accounts[0]
+    assert account["status"] == "active"
+    assert account["accountId"] == "wb_1088"
+    assert account["displayName"] == "BettaFish 运营号"
+    assert "lastCheckedAt" in account
+    assert account["details"]["nested"] == {"safe": "kept"}
+
+    serialized = json.dumps(account, ensure_ascii=False)
+    for forbidden_text in ("password", "token", "secret", "cookie", "not-allowed"):
+        assert forbidden_text not in serialized.lower()
+
+
+def test_crawler_accounts_are_workspace_scoped_and_page_sized(client: TestClient):
+    workspace_a = {"X-Workspace-Id": "workspace_accounts_a"}
+    workspace_b = {"X-Workspace-Id": "workspace_accounts_b"}
+
+    response = client.put(
+        "/api/v1/crawler-accounts/wb_public_2001",
+        headers=workspace_a,
+        json={"platformId": "wb", "displayName": "微博采集号", "status": "active"},
+    )
+    assert response.status_code == 200
+
+    list_response = client.get(
+        "/api/v1/crawler-accounts?platform=wb&status=active&pageSize=1",
+        headers=workspace_a,
+    )
+    assert list_response.status_code == 200
+    assert [item["accountId"] for item in list_response.json()["accounts"]] == [
+        "wb_public_2001"
+    ]
+
+    other_workspace = client.get("/api/v1/crawler-accounts", headers=workspace_b)
+    assert other_workspace.status_code == 200
+    assert other_workspace.json()["accounts"] == []
+
+
+def test_crawler_account_rejects_top_level_secret_fields(client: TestClient):
+    response = client.put(
+        "/api/v1/crawler-accounts/wb_secret",
+        headers=WORKSPACE_HEADERS,
+        json={"platformId": "wb", "status": "active", "token": "not-allowed"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_crawler_strategy_platform_policy_round_trip_and_invalid_platform(client: TestClient):
     payload = {
         "name": "微博每日采集",
@@ -194,10 +268,15 @@ def test_crawler_task_stop_retry_and_conflict(client: TestClient):
             "runMode": "deep_sentiment",
             "targetDate": "2026-05-22",
             "platforms": ["wb", "xhs"],
+            "keywords": ["养老服务", "医保支付"],
+            "keywordSource": "manual",
         },
     )
     assert create_response.status_code == 202
-    task_id = create_response.json()["task"]["id"]
+    task = create_response.json()["task"]
+    task_id = task["id"]
+    assert task["keywords"] == ["养老服务", "医保支付"]
+    assert task["keywordSource"] == "manual"
 
     stop_response = client.post(
         f"/api/v1/crawler-tasks/{task_id}:stop",
@@ -232,6 +311,60 @@ def test_crawler_task_platform_filter_applies_before_pagination(client: TestClie
     assert response.status_code == 200
     assert [task["id"] for task in response.json()["tasks"]] == [xhs_task["id"]]
     assert response.json()["tasks"][0]["id"] != wb_task["id"]
+
+
+def test_crawler_task_keywords_are_required_and_normalized(client: TestClient):
+    response = client.post(
+        "/api/v1/crawler-tasks",
+        headers=WORKSPACE_HEADERS,
+        json={
+            "runMode": "deep_sentiment",
+            "platforms": ["wb", "wb", "xhs"],
+            "keywords": ["  养老服务  ", "", "医保支付", "养老服务"],
+            "keywordSource": "manual",
+            "maxNotesPerKeyword": 1,
+            "maxCommentsPerNote": 0,
+            "loginType": "cookie",
+            "headless": False,
+        },
+    )
+    assert response.status_code == 202
+    task = response.json()["task"]
+    assert task["platforms"] == ["wb", "xhs"]
+    assert task["keywords"] == ["养老服务", "医保支付"]
+    assert task["maxNotesPerKeyword"] == 1
+    assert task["maxCommentsPerNote"] == 0
+    assert task["loginType"] == "cookie"
+    assert task["headless"] is False
+    assert task["stats"]["totalKeywords"] == 2
+    assert task["stats"]["totalTasks"] == 4
+
+    invalid = client.post(
+        "/api/v1/crawler-tasks",
+        headers=WORKSPACE_HEADERS,
+        json={
+            "runMode": "deep_sentiment",
+            "platforms": ["wb"],
+            "keywords": [],
+            "keywordSource": "manual",
+        },
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    out_of_bounds = client.post(
+        "/api/v1/crawler-tasks",
+        headers=WORKSPACE_HEADERS,
+        json={
+            "runMode": "deep_sentiment",
+            "platforms": ["wb"],
+            "keywords": ["养老服务"],
+            "keywordSource": "manual",
+            "maxCommentsPerNote": -1,
+        },
+    )
+    assert out_of_bounds.status_code == 422
+    assert out_of_bounds.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_crawler_task_status_filter_applies_before_pagination(client: TestClient):
@@ -295,6 +428,8 @@ def _create_crawler_task(
             "runMode": run_mode,
             "targetDate": "2026-05-22",
             "platforms": platforms,
+            "keywords": ["养老服务", "医保支付"],
+            "keywordSource": "manual",
         },
     )
     assert response.status_code == 202

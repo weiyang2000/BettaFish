@@ -57,6 +57,27 @@ test("loads and deletes existing identity rules through real API routes", async 
       }
     ]
   });
+  await routeJson(page, "/crawler-accounts", {
+    success: true,
+    accounts: [
+      {
+        id: "acct_wb_ops",
+        workspaceId: "workspace_e2e",
+        platformId: "wb",
+        accountId: "wb_1088",
+        status: "active",
+        username: "bettafish_ops",
+        displayName: "BettaFish 运营号",
+        loginType: "qrcode",
+        lastCheckedAt: timestamp,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        details: {
+          message: "账号可用于搜索和评论采集。"
+        }
+      }
+    ]
+  });
   await routeJson(page, "/platforms", {
     success: true,
     platforms: [
@@ -116,6 +137,91 @@ test("loads and deletes existing identity rules through real API routes", async 
   await expect(page.getByText("名单规则已删除")).toBeVisible();
   await expect(page.getByText("blocked_existing_001")).toHaveCount(0);
   expect(deleteRequests).toHaveLength(1);
+});
+
+test("creates crawler tasks with explicit keywords and selected platforms", async ({ page }) => {
+  let crawlerPayload: Record<string, unknown> | undefined;
+
+  await routeJson(page, "/system/components", {
+    success: true,
+    components: [{ id: "mindspider", name: "MindSpider", status: "running" }]
+  });
+  await routeJson(page, "/report-templates", { success: true, templates: [] });
+  await routeJson(page, "/report-tasks", { success: true, tasks: [] });
+  await routeJson(page, "/crawler-strategies", { success: true, strategies: [] });
+  await routeJson(page, "/crawler-accounts", { success: true, accounts: [] });
+  await routeJson(page, "/platforms", {
+    success: true,
+    platforms: [
+      platform("wb", "微博", { allow: 0, block: 0 }),
+      platform("xhs", "小红书", { allow: 0, block: 0 })
+    ]
+  });
+  await routeJson(page, "/system/config", { success: true, fields: [] });
+  await routeJson(page, "/logs?tail=300", { success: true, lines: [] });
+  await page.route(`${apiBase}/platforms/*/identity-lists`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, rules: [] })
+    });
+  });
+  await page.route(`${apiBase}/crawler-tasks`, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, tasks: [] })
+      });
+      return;
+    }
+
+    expect(route.request().method()).toBe("POST");
+    crawlerPayload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        task: {
+          id: "crawler_new",
+          workspaceId: "workspace_e2e",
+          runMode: crawlerPayload?.runMode,
+          status: "queued",
+          progress: 0,
+          targetDate: crawlerPayload?.targetDate,
+          platforms: crawlerPayload?.platforms,
+          keywords: crawlerPayload?.keywords,
+          keywordSource: crawlerPayload?.keywordSource,
+          stats: {
+            totalKeywords: 2,
+            totalPlatforms: 2,
+            totalTasks: 4,
+            successfulTasks: 0,
+            failedTasks: 0,
+            totalNotes: 0,
+            totalComments: 0
+          },
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }
+      })
+    });
+  });
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "爬虫" }).click();
+  await page.getByLabel("小红书").check();
+  await page.getByPlaceholder("每行一个关键词").fill(" 养老服务 \n医保支付\n养老服务");
+  await page.getByRole("button", { name: "创建任务" }).click();
+
+  expect(crawlerPayload).toMatchObject({
+    runMode: "deep_sentiment",
+    platforms: ["wb", "xhs"],
+    keywords: ["养老服务", "医保支付"],
+    keywordSource: "manual"
+  });
+  await expect(page.getByText("爬虫任务已创建")).toBeVisible();
 });
 
 async function routeJson(page: import("@playwright/test").Page, path: string, body: unknown) {

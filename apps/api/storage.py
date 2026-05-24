@@ -45,6 +45,12 @@ CREATE TABLE IF NOT EXISTS crawler_tasks (
     run_mode TEXT NOT NULL,
     target_date TEXT,
     platforms_json TEXT NOT NULL DEFAULT '[]',
+    keywords_json TEXT NOT NULL DEFAULT '[]',
+    keyword_source TEXT NOT NULL DEFAULT 'manual',
+    max_notes_per_keyword INTEGER NOT NULL DEFAULT 50,
+    max_comments_per_note INTEGER NOT NULL DEFAULT 100,
+    login_type TEXT,
+    headless INTEGER NOT NULL DEFAULT 1,
     overrides_json TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL,
     progress INTEGER NOT NULL DEFAULT 0,
@@ -57,6 +63,29 @@ CREATE TABLE IF NOT EXISTS crawler_tasks (
 
 CREATE INDEX IF NOT EXISTS idx_crawler_tasks_workspace
     ON crawler_tasks(workspace_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS crawler_accounts (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    platform_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    username TEXT,
+    display_name TEXT,
+    avatar_url TEXT,
+    profile_url TEXT,
+    status TEXT NOT NULL,
+    login_type TEXT,
+    last_login_at TEXT,
+    last_checked_at TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    error_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (workspace_id, platform_id, account_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_crawler_accounts_workspace
+    ON crawler_accounts(workspace_id, platform_id, status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS crawler_platform_configs (
     workspace_id TEXT NOT NULL,
@@ -175,6 +204,53 @@ class Store:
     def initialize(self) -> None:
         with self._connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._ensure_column(
+                conn,
+                "crawler_tasks",
+                "keywords_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
+            self._ensure_column(
+                conn,
+                "crawler_tasks",
+                "keyword_source",
+                "TEXT NOT NULL DEFAULT 'manual'",
+            )
+            self._ensure_column(
+                conn,
+                "crawler_tasks",
+                "max_notes_per_keyword",
+                "INTEGER NOT NULL DEFAULT 50",
+            )
+            self._ensure_column(
+                conn,
+                "crawler_tasks",
+                "max_comments_per_note",
+                "INTEGER NOT NULL DEFAULT 100",
+            )
+            self._ensure_column(
+                conn,
+                "crawler_tasks",
+                "login_type",
+                "TEXT",
+            )
+            self._ensure_column(
+                conn,
+                "crawler_tasks",
+                "headless",
+                "INTEGER NOT NULL DEFAULT 1",
+            )
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def execute(
         self,
@@ -211,4 +287,3 @@ class Store:
     ) -> list[dict[str, Any]]:
         with self._connect() as conn:
             return [dict(row) for row in conn.execute(sql, tuple(params)).fetchall()]
-

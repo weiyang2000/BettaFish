@@ -34,6 +34,20 @@ export type RunMode = "topic_extraction" | "deep_sentiment" | "full_workflow";
 
 export type IdentityListType = "allow" | "block";
 
+export type KeywordSource = "manual" | "broad_topic_extraction" | "mixed";
+
+export type CrawlerTaskKeywordSource = "manual";
+
+export type CrawlerAccountStatus =
+  | "active"
+  | "login_required"
+  | "expired"
+  | "disabled"
+  | "error"
+  | "unknown";
+
+export type CrawlerLoginType = "qrcode" | "phone" | "cookie";
+
 export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
 
 export type LogSource =
@@ -117,6 +131,8 @@ export interface CrawlerTask {
   strategyId?: string;
   targetDate?: string;
   platforms: PlatformId[];
+  keywords: string[];
+  keywordSource: CrawlerTaskKeywordSource;
   stats: CrawlerStats;
   owner?: UserRef;
   createdAt: string;
@@ -138,9 +154,9 @@ export interface PlatformPolicy {
   maxNotesPerKeyword: number;
   maxCommentsPerNote: number;
   keywords: string[];
-  keywordSource: "manual" | "broad_topic_extraction" | "mixed";
+  keywordSource: KeywordSource;
   frequency: CrawlFrequency;
-  loginType: "qrcode" | "phone" | "cookie";
+  loginType: CrawlerLoginType;
   headless: boolean;
   updatedAt: string;
 }
@@ -155,6 +171,7 @@ export interface Platform {
     allow: number;
     block: number;
   };
+  accountCounts?: Partial<Record<CrawlerAccountStatus | "loginRequired", number>>;
 }
 
 export interface IdentityRule {
@@ -208,6 +225,31 @@ export interface CrawlerStrategy {
   updatedAt: string;
 }
 
+export interface CrawlerAccountDetail {
+  scopes?: string[];
+  message?: string;
+  expiresAt?: string;
+  [key: string]: unknown;
+}
+
+export interface CrawlerAccount {
+  id: string;
+  workspaceId: string;
+  platformId: PlatformId;
+  accountId: string;
+  status: CrawlerAccountStatus;
+  username?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  profileUrl?: string;
+  loginType?: CrawlerLoginType;
+  lastLoginAt?: string;
+  lastCheckedAt?: string;
+  details?: CrawlerAccountDetail;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ConsoleSnapshot {
   workspaceId: string;
   generatedAt: string;
@@ -217,6 +259,7 @@ export interface ConsoleSnapshot {
   reportTemplates: ReportTemplate[];
   crawlerTasks: CrawlerTask[];
   crawlerStrategies: CrawlerStrategy[];
+  crawlerAccounts: CrawlerAccount[];
   platforms: Platform[];
   identityRules: IdentityRule[];
   configFields: ConfigField[];
@@ -235,6 +278,12 @@ export interface CreateCrawlerTaskInput {
   runMode: RunMode;
   targetDate: string;
   platforms: PlatformId[];
+  keywords: string[];
+  keywordSource: CrawlerTaskKeywordSource;
+  maxNotesPerKeyword?: number;
+  maxCommentsPerNote?: number;
+  loginType?: CrawlerLoginType;
+  headless?: boolean;
   owner: UserRef;
 }
 

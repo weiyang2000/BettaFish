@@ -56,7 +56,11 @@ export interface SystemComponent {
   id: ComponentId;
   name: string;
   status: ComponentStatus;
+  /**
+   * Optional infrastructure listener port. Not a Query/Media/Insight page route.
+   */
   port?: number;
+  healthUrl?: string;
   outputLines?: number;
   lastHeartbeatAt?: string;
   message?: string;

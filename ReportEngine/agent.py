@@ -318,13 +318,13 @@ class ReportAgent:
         """
         初始化文件数量基准。
 
-        将 Insight/Media/Query 三个目录传入 `FileCountBaseline`，
+        将 Insight/Media/Query 三个引擎报告目录传入 `FileCountBaseline`，
         生成一次性的参考值，之后按增量判断三引擎是否产出新报告。
         """
         directories = {
-            'insight': 'insight_engine_streamlit_reports',
-            'media': 'media_engine_streamlit_reports',
-            'query': 'query_engine_streamlit_reports'
+            'insight': 'engine_reports/insight',
+            'media': 'engine_reports/media',
+            'query': 'engine_reports/query'
         }
         self.file_baseline.initialize_baseline(directories)
     

@@ -412,9 +412,9 @@ def check_engines_ready() -> Dict[str, Any]:
     是 /status、/generate 的前置校验。
     """
     directories = {
-        'insight': 'insight_engine_streamlit_reports',
-        'media': 'media_engine_streamlit_reports',
-        'query': 'query_engine_streamlit_reports'
+        'insight': 'engine_reports/insight',
+        'media': 'engine_reports/media',
+        'query': 'engine_reports/query'
     }
 
     forum_log_path = 'logs/forum.log'

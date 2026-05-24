@@ -30,6 +30,9 @@ test("loads and deletes existing identity rules through real API routes", async 
   await routeJson(page, "/system/components", {
     success: true,
     components: [
+      { id: "query", name: "Query Engine", status: "running", port: 9001, lastHeartbeatAt: timestamp },
+      { id: "media", name: "Media Engine", status: "running", port: 9002, lastHeartbeatAt: timestamp },
+      { id: "insight", name: "Insight Engine", status: "degraded", port: 9003, lastHeartbeatAt: timestamp },
       { id: "report", name: "Report Engine", status: "running" },
       { id: "mindspider", name: "MindSpider", status: "running" }
     ]
@@ -100,6 +103,8 @@ test("loads and deletes existing identity rules through real API routes", async 
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("API connected")).toBeVisible();
+  await expect(page.getByText("Query Engine")).toBeVisible();
+  await expect(page.getByText(/:900[123]/)).toHaveCount(0);
   await page.getByRole("button", { name: "平台规则" }).click();
 
   expect(identityRequests).toEqual(["wb", "xhs"]);

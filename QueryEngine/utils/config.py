@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     MAX_SEARCH_RESULTS: int = Field(20, description="最大搜索结果数")
     
     # ================== 输出配置 ====================
-    OUTPUT_DIR: str = Field("reports", description="输出目录")
+    OUTPUT_DIR: str = Field("engine_reports/query", description="输出目录")
     SAVE_INTERMEDIATE_STATES: bool = Field(True, description="是否保存中间状态")
     
     class Config:

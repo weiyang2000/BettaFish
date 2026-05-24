@@ -355,9 +355,7 @@ test_results/
 OperationGuidance/
 
 db_data/
-insight_engine_streamlit_reports/
-media_engine_streamlit_reports/
-query_engine_streamlit_reports/
+engine_reports/
 final_reports/
 forward_prs.sh
 

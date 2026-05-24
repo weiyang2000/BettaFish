@@ -239,15 +239,10 @@ BettaFish/
 │       ├── train.py
 │       ├── predict.py
 │       └── ...
-├── SingleEngineApp/                        # Individual Agent Streamlit applications
-│   ├── query_engine_streamlit_app.py       # QueryEngine standalone app
-│   ├── media_engine_streamlit_app.py       # MediaEngine standalone app
-│   └── insight_engine_streamlit_app.py     # InsightEngine standalone app
-├── query_engine_streamlit_reports/         # QueryEngine standalone app outputs
-├── media_engine_streamlit_reports/         # MediaEngine standalone app outputs
-├── insight_engine_streamlit_reports/       # InsightEngine standalone app outputs
-├── templates/                              # Flask frontend templates
-│   └── index.html                          # Main interface HTML
+├── engine_reports/                         # Query/Media/Insight engine report inputs
+│   ├── query/
+│   ├── media/
+│   └── insight/
 ├── static/                                 # Static resources
 │   ├── image/                              # Image resources
 │   │   └── ...
@@ -267,7 +262,7 @@ BettaFish/
 │   ├── test_monitor.py                     # ForumEngine monitoring unit tests
 │   ├── test_report_engine_sanitization.py  # ReportEngine security tests
 │   └── ...
-├── app.py                                  # Flask main application entry point
+├── app.py                                  # FastAPI service launcher
 ├── config.py                               # Global configuration file
 ├── .env.example                            # Environment variable example file
 ├── docker-compose.yml                      # Docker multi-service orchestration config
@@ -392,7 +387,7 @@ DB_NAME=your_db_name
 DB_CHARSET=utf8mb4
 # Database type: postgresql or mysql
 DB_DIALECT=postgresql
-# Database initialization is not required, as it will be checked automatically upon executing app.py
+# The SaaS API initializes task/config storage on startup; initialize crawler databases through the MindSpider docs
 
 # ====================== LLM Configuration ======================
 # You can switch each Engine's LLM provider as long as it follows the OpenAI-compatible request format
@@ -409,13 +404,13 @@ INSIGHT_ENGINE_MODEL_NAME=
 
 ### 6. Launch System
 
-#### 6.1 Complete System Launch (Recommended)
+#### 6.1 SaaS Service Launch (Recommended)
 
 ```bash
 # In project root directory, activate conda environment
 conda activate your_conda_name
 
-# Start main application
+# Start the versioned API
 python app.py
 ```
 
@@ -424,30 +419,23 @@ uv version startup command:
 # In project root directory, activate uv environment
 .venv\Scripts\activate
 
-# Start main application
-python app.py
+# Or start the ASGI service directly
+uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-> Note 1: After a run is terminated, the Streamlit app might not shut down correctly and may still be occupying the port. If this occurs, find the process that is holding the port and kill it.
-
-> Note 2: Data scraping needs to be performed as a separate operation. Please refer to the instructions in section 5.3.
-
-Visit http://localhost:5000 to use the complete system
-
-#### 6.2 Launch Individual Agents
+The local API base URL is `http://localhost:8000/api/v1`. Requests must include
+`X-Workspace-Id`, for example:
 
 ```bash
-# Start QueryEngine
-streamlit run SingleEngineApp/query_engine_streamlit_app.py --server.port 8503
-
-# Start MediaEngine  
-streamlit run SingleEngineApp/media_engine_streamlit_app.py --server.port 8502
-
-# Start InsightEngine
-streamlit run SingleEngineApp/insight_engine_streamlit_app.py --server.port 8501
+curl -H "X-Workspace-Id: workspace_demo" \
+  http://localhost:8000/api/v1/health
 ```
 
-#### 6.3 Crawler System Standalone Use
+By default, LLM report and browser crawler tasks are not executed directly; the
+SaaS task lifecycle is persisted. Set `BETTAFISH_API_RUN_WORKERS=true` to run
+deterministic placeholder workers for local events and artifacts.
+
+#### 6.2 Crawler System Standalone Use
 
 This section has detailed configuration documentation: [MindSpider Usage Guide](./MindSpider/README.md)
 
@@ -477,7 +465,7 @@ python main.py --broad-topic --date 2024-01-20
 python main.py --deep-sentiment --platforms xhs dy wb
 ```
 
-#### 6.4 Command-line Report Generation Tool
+#### 6.3 Command-line Report Generation Tool
 
 This tool bypasses the execution phase of all three analysis engines, directly loads their most recent log files, and generates a consolidated report without requiring the Web interface (while also skipping incremental file-validation steps). It will also generate a Markdown copy after the PDF by default (toggle via CLI flag). It is typically used when rapid retries are needed due to unsatisfactory report outputs, or when debugging the Report Engine.
 
@@ -504,7 +492,7 @@ python report_engine_only.py --help
 **Features:**
 
 1. **Automatic Dependency Check**: The program automatically checks system dependencies required for PDF generation and provides installation instructions if missing
-2. **Get Latest Files**: Automatically retrieves the latest analysis reports from three engine directories (`insight_engine_streamlit_reports`, `media_engine_streamlit_reports`, `query_engine_streamlit_reports`)
+2. **Get Latest Files**: Automatically retrieves the latest analysis reports from three engine directories (`engine_reports/insight`, `engine_reports/media`, `engine_reports/query`)
 3. **File Confirmation**: Displays all selected file names, paths, and modification times, waiting for user confirmation (default input `y` to continue, input `n` to exit)
 4. **Direct Report Generation**: Skips file addition verification and directly calls Report Engine to generate comprehensive reports
 5. **Automatic File Saving**:
@@ -515,7 +503,7 @@ python report_engine_only.py --help
 
 **Notes:**
 
-- Ensure at least one of the three engine directories contains `.md` report files
+- Ensure at least one of `engine_reports/insight`, `engine_reports/media`, or `engine_reports/query` contains `.md` report files
 - The command-line tool is independent of the Web interface and does not interfere with each other
 - PDF generation requires system dependencies, see "Install PDF Export System Dependencies" section above
 

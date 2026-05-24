@@ -516,7 +516,7 @@ export function ConsoleShell() {
                         <span>{component.message ?? "No message"}</span>
                       </div>
                       <div className="row-meta">
-                        {component.port && <span>:{component.port}</span>}
+                        {component.lastHeartbeatAt && <span>{formatTime(component.lastHeartbeatAt)}</span>}
                         <StatusBadge value={component.status} />
                       </div>
                     </div>

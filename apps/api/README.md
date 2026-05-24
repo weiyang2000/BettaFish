@@ -47,9 +47,8 @@ the required SaaS tables:
 ## Frontend and database
 
 The BET-3 frontend calls this service through `NEXT_PUBLIC_API_BASE_URL`, for
-example `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1`. The existing
-legacy Flask app can still run on port `5000`; the SaaS API intentionally lives
-on a separate Uvicorn process while the migration is in progress.
+example `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1`. The repo-level
+`python app.py` launcher now starts the same FastAPI service.
 
 For local database-backed crawler work, start the Postgres service from the
 repo-level `docker-compose.yml`. The SaaS service itself only needs SQLite for

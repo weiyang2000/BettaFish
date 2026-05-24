@@ -12,6 +12,8 @@ test("opens every primary SaaS console section", async ({ page }) => {
 
   await expect(page.getByText("Mock adapter")).toBeVisible();
   await expect(page.getByRole("heading", { name: "运行总览" })).toBeVisible();
+  await expect(page.getByText("Query Engine")).toBeVisible();
+  await expect(page.getByText(":5432")).toHaveCount(0);
 
   for (const [nav, heading] of [
     ["报告", "报告任务"],

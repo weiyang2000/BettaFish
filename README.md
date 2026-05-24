@@ -240,15 +240,10 @@ BettaFish/
 │       ├── train.py
 │       ├── predict.py
 │       └── ...
-├── SingleEngineApp/                        # 单独Agent的Streamlit应用
-│   ├── query_engine_streamlit_app.py       # QueryEngine独立应用
-│   ├── media_engine_streamlit_app.py       # MediaEngine独立应用
-│   └── insight_engine_streamlit_app.py     # InsightEngine独立应用
-├── query_engine_streamlit_reports/         # QueryEngine单应用运行输出
-├── media_engine_streamlit_reports/         # MediaEngine单应用运行输出
-├── insight_engine_streamlit_reports/       # InsightEngine单应用运行输出
-├── templates/                              # Flask前端模板
-│   └── index.html                          # 主界面HTML
+├── engine_reports/                         # Query/Media/Insight 引擎报告输入目录
+│   ├── query/
+│   ├── media/
+│   └── insight/
 ├── static/                                 # 静态资源
 │   ├── image/                              # 图片资源
 │   │   └── ...
@@ -268,7 +263,7 @@ BettaFish/
 │   ├── test_monitor.py                     # ForumEngine监控单元测试
 │   ├── test_report_engine_sanitization.py  # ReportEngine安全性测试
 │   └── ...
-├── app.py                                  # Flask主应用入口
+├── app.py                                  # FastAPI服务启动入口
 ├── config.py                               # 全局配置文件
 ├── .env.example                            # 环境变量示例文件
 ├── docker-compose.yml                      # Docker多服务编排配置
@@ -297,10 +292,9 @@ BettaFish/
 docker compose up -d
 ```
 
-Compose 会启动三个关键服务：
+Compose 会启动以下服务：
 
 - `api`：新的 SaaS 服务层，FastAPI/Uvicorn，地址为 `http://localhost:8000/api/v1`。
-- `bettafish`：保留旧 Flask + Streamlit 编排入口，地址为 `http://localhost:5000`。
 - `db`：PostgreSQL，用于 MindSpider/业务数据；SaaS API 的任务与配置元数据默认写入 `./data/saas_api.sqlite3`。
 
 > **注：镜像拉取速度慢**，在原 `docker-compose.yml` 文件中，我们已经通过**注释**的方式提供了备用镜像地址供您替换
@@ -403,7 +397,7 @@ DB_NAME=your_db_name
 DB_CHARSET=utf8mb4
 # 数据库类型postgresql或mysql
 DB_DIALECT=postgresql
-# 数据库不需要初始化，执行app.py时会自动检测
+# SaaS API 会在启动时初始化任务/配置存储；爬虫业务库按 MindSpider 文档初始化
 
 # ====================== LLM配置 ======================
 # 您可以更改每个部分LLM使用的API，只要兼容OpenAI请求格式都可以
@@ -420,13 +414,13 @@ INSIGHT_ENGINE_MODEL_NAME=
 
 ### 6. 启动系统
 
-#### 6.1 完整系统启动（推荐）
+#### 6.1 SaaS 服务层启动（推荐）
 
 ```bash
 # 在项目根目录下，激活conda环境
 conda activate your_conda_name
 
-# 启动主应用即可
+# 启动版本化 API
 python app.py
 ```
 
@@ -435,21 +429,7 @@ uv 版本启动命令
 # 在项目根目录下，激活uv环境
 .venv\Scripts\activate
 
-# 启动主应用即可
-python app.py
-```
-
-> 注1：一次运行终止后，streamlit app可能结束异常仍然占用端口，此时搜索占用端口的进程kill掉即可
-
-> 注2：数据爬取需要单独操作，见6.3指引
-
-访问 http://localhost:5000 即可使用完整系统
-
-#### 6.1.1 SaaS 服务层启动
-
-新的服务层按 `docs/openapi/saas-platform.yaml` 提供版本化 API：
-
-```bash
+# 也可以直接启动 ASGI 服务
 uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -464,20 +444,7 @@ curl -H "X-Workspace-Id: workspace_demo" \
 默认不直接执行 LLM 报告和浏览器爬虫任务，只持久化 SaaS 任务生命周期；
 如需本地生成占位报告与事件流，可设置 `BETTAFISH_API_RUN_WORKERS=true`。
 
-#### 6.2 单独启动某个Agent
-
-```bash
-# 启动QueryEngine
-streamlit run SingleEngineApp/query_engine_streamlit_app.py --server.port 8503
-
-# 启动MediaEngine  
-streamlit run SingleEngineApp/media_engine_streamlit_app.py --server.port 8502
-
-# 启动InsightEngine
-streamlit run SingleEngineApp/insight_engine_streamlit_app.py --server.port 8501
-```
-
-#### 6.3 爬虫系统单独使用
+#### 6.2 爬虫系统单独使用
 
 这部分有详细的配置文档：[MindSpider使用说明](./MindSpider/README.md)
 
@@ -507,7 +474,7 @@ python main.py --broad-topic --date 2024-01-20
 python main.py --deep-sentiment --platforms xhs dy wb
 ```
 
-#### 6.4 命令行报告生成工具
+#### 6.3 命令行报告生成工具
 
 该工具会跳过三个分析引擎的运行阶段，直接读取它们的最新日志文件，并在无需 Web 界面的情况下生成综合报告（同时省略文件增量校验步骤），默认会在 PDF 之后自动生成 Markdown（可用参数关闭）。通常用于对报告生成结果不满意、需要快速重试的场景，或在调试 Report Engine 时启用。
 
@@ -534,7 +501,7 @@ python report_engine_only.py --help
 **功能说明：**
 
 1. **自动检查依赖**：程序会自动检查PDF生成所需的系统依赖，如果缺失会给出安装提示
-2. **获取最新文件**：自动从三个引擎目录（`insight_engine_streamlit_reports`、`media_engine_streamlit_reports`、`query_engine_streamlit_reports`）获取最新的分析报告
+2. **获取最新文件**：自动从三个引擎目录（`engine_reports/insight`、`engine_reports/media`、`engine_reports/query`）获取最新的分析报告
 3. **文件确认**：显示所有选择的文件名、路径和修改时间，等待用户确认（默认输入 `y` 继续，输入 `n` 退出）
 4. **直接生成报告**：跳过文件增加审核程序，直接调用Report Engine生成综合报告
 5. **自动保存文件**：
@@ -545,7 +512,7 @@ python report_engine_only.py --help
 
 **注意事项：**
 
-- 确保三个引擎目录中至少有一个包含`.md`报告文件
+- 确保 `engine_reports/insight`、`engine_reports/media`、`engine_reports/query` 中至少有一个包含 `.md` 报告文件
 - 命令行工具与Web界面相互独立，不会相互影响
 - PDF生成需要安装系统依赖，详见上文"安装 PDF 导出所需系统依赖"部分
 

@@ -1,5 +1,7 @@
 import re
+import sys
 import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +10,8 @@ import yaml
 from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
+from apps.api.services.tasks import TaskService
+from apps.api.storage import Store
 
 
 WORKSPACE_HEADERS = {"X-Workspace-Id": "workspace_contract"}
@@ -76,6 +80,8 @@ def test_runtime_openapi_exposes_key_contract_operations(client: TestClient):
         "/api/v1/system/config",
         "/api/v1/report-tasks",
         "/api/v1/report-tasks/{task_id}:cancel",
+        "/api/v1/crawler-accounts",
+        "/api/v1/crawler-accounts/{accountId}",
         "/api/v1/crawler-tasks/{task_id}:retry",
         "/api/v1/platforms/{platform_id}/identity-lists",
     ]
@@ -99,6 +105,19 @@ def test_contract_error_cases_return_structured_errors(client: TestClient):
     missing_task = client.get("/api/v1/crawler-tasks/missing", headers=WORKSPACE_HEADERS)
     assert missing_task.status_code == 404
     assert missing_task.json()["error"]["code"] == "NOT_FOUND"
+
+    invalid_crawler = client.post(
+        "/api/v1/crawler-tasks",
+        headers=WORKSPACE_HEADERS,
+        json={
+            "runMode": "deep_sentiment",
+            "platforms": ["wb"],
+            "keywords": [],
+            "keywordSource": "manual",
+        },
+    )
+    assert invalid_crawler.status_code == 422
+    assert invalid_crawler.json()["error"]["code"] == "VALIDATION_ERROR"
 
     report = client.post(
         "/api/v1/report-tasks",
@@ -194,6 +213,8 @@ def test_stub_workers_complete_report_and_crawler_main_flows(worker_client: Test
             "runMode": "full_workflow",
             "targetDate": "2026-05-22",
             "platforms": ["wb", "xhs"],
+            "keywords": ["养老服务", "医保支付"],
+            "keywordSource": "manual",
         },
     )
     assert crawler_response.status_code == 202
@@ -205,8 +226,92 @@ def test_stub_workers_complete_report_and_crawler_main_flows(worker_client: Test
         "succeeded",
     )
     assert completed_crawler["progress"] == 100
+    assert completed_crawler["keywords"] == ["养老服务", "医保支付"]
+    assert completed_crawler["keywordSource"] == "manual"
+    assert completed_crawler["stats"]["totalKeywords"] == 2
     assert completed_crawler["stats"]["totalPlatforms"] == 2
+    assert completed_crawler["stats"]["totalTasks"] == 4
+    assert completed_crawler["stats"]["platformSummary"]["wb"]["successfulKeywords"] == 2
+    assert completed_crawler["stats"]["platformSummary"]["xhs"]["successfulKeywords"] == 2
     assert completed_crawler["stats"]["totalNotes"] > 0
+
+
+def test_real_crawler_adapter_invokes_keyword_platform_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[dict[str, Any]] = []
+
+    class FakePlatformCrawler:
+        def run_multi_platform_crawl_by_keywords(
+            self,
+            keywords: list[str],
+            platforms: list[str],
+            *,
+            login_type: str,
+            max_notes_per_keyword: int,
+        ) -> dict[str, Any]:
+            calls.append(
+                {
+                    "keywords": keywords,
+                    "platforms": platforms,
+                    "loginType": login_type,
+                    "maxNotesPerKeyword": max_notes_per_keyword,
+                }
+            )
+            return {
+                "total_keywords": len(keywords),
+                "total_platforms": len(platforms),
+                "total_tasks": len(keywords) * len(platforms),
+                "successful_tasks": len(keywords) * len(platforms),
+                "failed_tasks": 0,
+                "total_notes": 12,
+                "total_comments": 30,
+                "platform_summary": {
+                    platform: {
+                        "successful_keywords": len(keywords),
+                        "failed_keywords": 0,
+                        "total_notes": 6,
+                        "total_comments": 15,
+                    }
+                    for platform in platforms
+                },
+            }
+
+    fake_module = types.ModuleType("MindSpider.DeepSentimentCrawling.platform_crawler")
+    fake_module.PlatformCrawler = FakePlatformCrawler
+    monkeypatch.setitem(
+        sys.modules,
+        "MindSpider.DeepSentimentCrawling.platform_crawler",
+        fake_module,
+    )
+
+    service = TaskService(
+        Store(tmp_path / "adapter.sqlite3"),
+        tmp_path / "artifacts",
+        run_workers=False,
+    )
+    stats = service._run_real_crawler(
+        {
+            "keywords": ["养老服务", "医保支付"],
+            "platforms": ["wb", "xhs"],
+            "loginType": "phone",
+            "maxNotesPerKeyword": 7,
+        }
+    )
+
+    assert calls == [
+        {
+            "keywords": ["养老服务", "医保支付"],
+            "platforms": ["wb", "xhs"],
+            "loginType": "phone",
+            "maxNotesPerKeyword": 7,
+        }
+    ]
+    assert stats["totalKeywords"] == 2
+    assert stats["totalPlatforms"] == 2
+    assert stats["totalTasks"] == 4
+    assert stats["platformSummary"]["wb"]["totalNotes"] == 6
 
 
 def _normalize_path(path: str) -> str:

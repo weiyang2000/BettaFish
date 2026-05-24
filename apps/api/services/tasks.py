@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -16,12 +17,12 @@ from apps.api.schemas import (
     UserRef,
 )
 from apps.api.services.common import new_id, slugify_filename, utc_now
-from apps.api.services.platforms import default_policy
 from apps.api.storage import Store, dumps, loads
 
 
 TERMINAL_REPORT_STATUSES = {"succeeded", "failed", "cancelled"}
 TERMINAL_CRAWLER_STATUSES = {"succeeded", "failed", "stopped", "cancelled"}
+CRAWLER_ADAPTER_ENV = "BETTAFISH_API_CRAWLER_ADAPTER"
 
 
 class TaskService:
@@ -299,9 +300,9 @@ class TaskService:
         task_id = new_id("crawler")
         now = utc_now()
         stats = {
-            "totalKeywords": 0,
+            "totalKeywords": len(payload.keywords),
             "totalPlatforms": len(payload.platforms),
-            "totalTasks": 0,
+            "totalTasks": len(payload.keywords) * len(payload.platforms),
             "successfulTasks": 0,
             "failedTasks": 0,
             "totalNotes": 0,
@@ -312,9 +313,11 @@ class TaskService:
             """
             INSERT INTO crawler_tasks (
                 id, workspace_id, strategy_id, run_mode, target_date,
-                platforms_json, overrides_json, status, progress, stats_json,
+                platforms_json, keywords_json, keyword_source,
+                max_notes_per_keyword, max_comments_per_note, login_type,
+                headless, overrides_json, status, progress, stats_json,
                 owner_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task_id,
@@ -323,6 +326,16 @@ class TaskService:
                 payload.runMode,
                 payload.targetDate,
                 dumps(payload.platforms),
+                dumps(payload.keywords),
+                payload.keywordSource,
+                payload.maxNotesPerKeyword
+                if payload.maxNotesPerKeyword is not None
+                else 50,
+                payload.maxCommentsPerNote
+                if payload.maxCommentsPerNote is not None
+                else 100,
+                payload.loginType,
+                1 if payload.headless is not False else 0,
                 dumps([item.model_dump(mode="json") for item in payload.overrides]),
                 "queued",
                 0,
@@ -336,7 +349,7 @@ class TaskService:
         self.add_event(workspace_id, task_id, "crawler", "status", {"task": task})
         if self.run_workers:
             threading.Thread(
-                target=self._run_stub_crawler,
+                target=self._run_crawler_worker,
                 args=(workspace_id, task_id),
                 daemon=True,
             ).start()
@@ -506,24 +519,106 @@ class TaskService:
         task = self.get_report_task(workspace_id, task_id)
         self.add_event(workspace_id, task_id, "report", "completed", {"task": task})
 
-    def _run_stub_crawler(self, workspace_id: str, task_id: str) -> None:
+    def _run_crawler_worker(self, workspace_id: str, task_id: str) -> None:
         task = self.get_crawler_task(workspace_id, task_id)
+        if task["status"] in TERMINAL_CRAWLER_STATUSES:
+            return
+        self._mark_crawler_running(workspace_id, task_id)
+
+        adapter_mode = os.getenv(CRAWLER_ADAPTER_ENV, "stub").lower()
+        if adapter_mode not in {"auto", "real", "stub"}:
+            adapter_mode = "stub"
+
+        if adapter_mode in {"auto", "real"}:
+            try:
+                stats = self._run_real_crawler(task)
+                self._complete_crawler_task(workspace_id, task_id, stats)
+                return
+            except Exception as exc:
+                if adapter_mode == "real":
+                    self._fail_crawler_task(workspace_id, task_id, exc)
+                    return
+
+        stats = self._stub_crawler_stats(task)
+        self._complete_crawler_task(workspace_id, task_id, stats)
+
+    def _mark_crawler_running(self, workspace_id: str, task_id: str) -> None:
+        now = utc_now()
+        self.store.execute(
+            """
+            UPDATE crawler_tasks
+            SET status = 'running', progress = 10, updated_at = ?
+            WHERE workspace_id = ? AND id = ?
+            """,
+            (now, workspace_id, task_id),
+        )
+        task = self.get_crawler_task(workspace_id, task_id)
+        self.add_event(workspace_id, task_id, "crawler", "progress", {"task": task})
+
+    def _run_real_crawler(self, task: dict[str, Any]) -> dict[str, Any]:
+        from MindSpider.DeepSentimentCrawling.platform_crawler import PlatformCrawler
+
+        crawler = PlatformCrawler()
+        result = crawler.run_multi_platform_crawl_by_keywords(
+            task["keywords"],
+            task["platforms"],
+            login_type=task.get("loginType") or "qrcode",
+            max_notes_per_keyword=task.get("maxNotesPerKeyword") or 50,
+        )
+        return self._real_crawler_stats_to_api(result)
+
+    @staticmethod
+    def _real_crawler_stats_to_api(result: dict[str, Any]) -> dict[str, Any]:
+        platform_summary = {}
+        for platform, summary in result.get("platform_summary", {}).items():
+            platform_summary[platform] = {
+                "successfulKeywords": summary.get("successful_keywords", 0),
+                "failedKeywords": summary.get("failed_keywords", 0),
+                "totalNotes": summary.get("total_notes", 0),
+                "totalComments": summary.get("total_comments", 0),
+            }
+        return {
+            "totalKeywords": result.get("total_keywords", 0),
+            "totalPlatforms": result.get("total_platforms", 0),
+            "totalTasks": result.get("total_tasks", 0),
+            "successfulTasks": result.get("successful_tasks", 0),
+            "failedTasks": result.get("failed_tasks", 0),
+            "totalNotes": result.get("total_notes", 0),
+            "totalComments": result.get("total_comments", 0),
+            "platformSummary": platform_summary,
+        }
+
+    @staticmethod
+    def _stub_crawler_stats(task: dict[str, Any]) -> dict[str, Any]:
         platforms = task["platforms"]
-        total_keywords = 0
-        for platform in platforms:
-            policy = default_policy(platform)
-            total_keywords += max(1, len(policy["keywords"]))
+        total_keywords = len(task.get("keywords", []))
         time.sleep(0.05)
-        stats = {
+        total_tasks = total_keywords * len(platforms)
+        return {
             "totalKeywords": total_keywords,
             "totalPlatforms": len(platforms),
-            "totalTasks": total_keywords * len(platforms),
-            "successfulTasks": total_keywords * len(platforms),
+            "totalTasks": total_tasks,
+            "successfulTasks": total_tasks,
             "failedTasks": 0,
-            "totalNotes": total_keywords * len(platforms) * 10,
-            "totalComments": total_keywords * len(platforms) * 50,
-            "platformSummary": {},
+            "totalNotes": total_tasks * 10,
+            "totalComments": total_tasks * 50,
+            "platformSummary": {
+                platform: {
+                    "successfulKeywords": total_keywords,
+                    "failedKeywords": 0,
+                    "totalNotes": total_keywords * 10,
+                    "totalComments": total_keywords * 50,
+                }
+                for platform in platforms
+            },
         }
+
+    def _complete_crawler_task(
+        self,
+        workspace_id: str,
+        task_id: str,
+        stats: dict[str, Any],
+    ) -> None:
         now = utc_now()
         self.store.execute(
             """
@@ -535,6 +630,31 @@ class TaskService:
         )
         task = self.get_crawler_task(workspace_id, task_id)
         self.add_event(workspace_id, task_id, "crawler", "completed", {"task": task})
+
+    def _fail_crawler_task(
+        self,
+        workspace_id: str,
+        task_id: str,
+        exc: Exception,
+    ) -> None:
+        now = utc_now()
+        error = {
+            "success": False,
+            "error": {
+                "code": "CRAWLER_ADAPTER_FAILED",
+                "message": str(exc),
+            },
+        }
+        self.store.execute(
+            """
+            UPDATE crawler_tasks
+            SET status = 'failed', progress = 100, error_json = ?, updated_at = ?
+            WHERE workspace_id = ? AND id = ?
+            """,
+            (dumps(error), now, workspace_id, task_id),
+        )
+        task = self.get_crawler_task(workspace_id, task_id)
+        self.add_event(workspace_id, task_id, "crawler", "failed", {"task": task})
 
     def _report_row(self, row: dict[str, Any]) -> dict[str, Any]:
         task = {
@@ -565,6 +685,12 @@ class TaskService:
             "runMode": row["run_mode"],
             "targetDate": row["target_date"],
             "platforms": loads(row["platforms_json"], []),
+            "keywords": loads(row["keywords_json"], []),
+            "keywordSource": row["keyword_source"],
+            "maxNotesPerKeyword": row["max_notes_per_keyword"],
+            "maxCommentsPerNote": row["max_comments_per_note"],
+            "loginType": row["login_type"],
+            "headless": bool(row["headless"]),
             "status": row["status"],
             "progress": row["progress"],
             "stats": loads(row["stats_json"], {}),

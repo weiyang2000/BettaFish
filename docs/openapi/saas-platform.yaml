@@ -461,6 +461,75 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /crawler-accounts:
+    get:
+      tags: [Crawlers]
+      summary: List crawler login accounts with non-sensitive status details.
+      description: |
+        Returns account metadata required by the SaaS console. Sensitive
+        credentials such as cookies, tokens, passwords, and QR secrets must
+        never be returned by this endpoint.
+      operationId: listCrawlerAccounts
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: platform
+          in: query
+          schema:
+            $ref: "#/components/schemas/PlatformId"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/CrawlerAccountStatus"
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Crawler account list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerAccountListResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /crawler-accounts/{accountId}:
+    put:
+      tags: [Crawlers]
+      summary: Upsert a crawler login account profile without sensitive credentials.
+      description: |
+        Used by crawler adapters or admin tooling to register the current
+        non-sensitive account profile after login or verification. Request
+        bodies must not include cookies, tokens, passwords, authorization
+        headers, QR secrets, or browser storage.
+      operationId: upsertCrawlerAccount
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrawlerAccountUpsertRequest"
+      responses:
+        "200":
+          description: Account upserted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlerAccountResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
   /crawler-tasks:
     get:
       tags: [Crawlers]
@@ -497,12 +566,13 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateCrawlerTaskRequest"
             examples:
-              dailyCrawl:
+              manualKeywordCrawl:
                 value:
-                  strategyId: strategy_daily_hot_topics
-                  runMode: full_workflow
+                  runMode: deep_sentiment
                   targetDate: "2026-05-22"
-                  platforms: [wb, xhs, zhihu]
+                  platforms: [wb, xhs]
+                  keywords: [养老服务, 医保支付]
+                  keywordSource: manual
                   owner:
                     userId: user_demo
                     displayName: Demo Operator
@@ -786,6 +856,10 @@ components:
       type: string
       enum: [queued, pending, running, succeeded, failed, stopping, stopped, cancelled]
 
+    CrawlerAccountStatus:
+      type: string
+      enum: [active, login_required, expired, disabled, error, unknown]
+
     ComponentId:
       type: string
       enum: [query, media, insight, forum, report, mindspider, database]
@@ -813,6 +887,14 @@ components:
     IdentityListType:
       type: string
       enum: [allow, block]
+
+    KeywordSource:
+      type: string
+      enum: [manual, broad_topic_extraction, mixed]
+
+    CrawlerTaskKeywordSource:
+      type: string
+      enum: [manual]
 
     ApiErrorCode:
       type: string
@@ -1323,8 +1405,7 @@ components:
           items:
             type: string
         keywordSource:
-          type: string
-          enum: [manual, broad_topic_extraction, mixed]
+          $ref: "#/components/schemas/KeywordSource"
         frequency:
           $ref: "#/components/schemas/CrawlFrequency"
         loginType:
@@ -1428,9 +1509,114 @@ components:
           items:
             $ref: "#/components/schemas/CrawlerStrategy"
 
+    CrawlerAccountDetails:
+      type: object
+      description: Non-sensitive account details suitable for UI display.
+      additionalProperties: true
+
+    CrawlerAccount:
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceScoped"
+        - type: object
+          required: [id, platformId, accountId, status, createdAt, updatedAt]
+          properties:
+            id:
+              type: string
+            platformId:
+              $ref: "#/components/schemas/PlatformId"
+            accountId:
+              type: string
+            status:
+              $ref: "#/components/schemas/CrawlerAccountStatus"
+            username:
+              type: string
+            displayName:
+              type: string
+            avatarUrl:
+              type: string
+              format: uri
+            profileUrl:
+              type: string
+              format: uri
+            loginType:
+              type: string
+              enum: [qrcode, phone, cookie]
+            lastLoginAt:
+              type: string
+              format: date-time
+            lastCheckedAt:
+              type: string
+              format: date-time
+            details:
+              $ref: "#/components/schemas/CrawlerAccountDetails"
+            error:
+              $ref: "#/components/schemas/ErrorResponse"
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+
+    CrawlerAccountUpsertRequest:
+      type: object
+      required: [platformId, status]
+      properties:
+        platformId:
+          $ref: "#/components/schemas/PlatformId"
+        username:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        profileUrl:
+          type: string
+          format: uri
+        status:
+          $ref: "#/components/schemas/CrawlerAccountStatus"
+        loginType:
+          type: string
+          enum: [qrcode, phone, cookie]
+        lastLoginAt:
+          type: string
+          format: date-time
+        lastCheckedAt:
+          type: string
+          format: date-time
+        details:
+          $ref: "#/components/schemas/CrawlerAccountDetails"
+        error:
+          $ref: "#/components/schemas/ErrorResponse"
+
+    CrawlerAccountResponse:
+      type: object
+      required: [success, account]
+      properties:
+        success:
+          type: boolean
+          const: true
+        account:
+          $ref: "#/components/schemas/CrawlerAccount"
+
+    CrawlerAccountListResponse:
+      type: object
+      required: [success, accounts]
+      properties:
+        success:
+          type: boolean
+          const: true
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/CrawlerAccount"
+        nextPageToken:
+          type: string
+
     CreateCrawlerTaskRequest:
       type: object
-      required: [runMode, platforms]
+      required: [runMode, platforms, keywords, keywordSource]
       properties:
         strategyId:
           type: string
@@ -1444,6 +1630,28 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/PlatformId"
+        keywords:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: string
+            minLength: 1
+        keywordSource:
+          $ref: "#/components/schemas/CrawlerTaskKeywordSource"
+        maxNotesPerKeyword:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        maxCommentsPerNote:
+          type: integer
+          minimum: 0
+          maximum: 5000
+        loginType:
+          type: string
+          enum: [qrcode, phone, cookie]
+        headless:
+          type: boolean
         overrides:
           type: array
           items:
@@ -1455,7 +1663,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/WorkspaceScoped"
         - type: object
-          required: [id, runMode, status, progress, platforms, createdAt, updatedAt]
+          required: [id, runMode, status, progress, platforms, keywords, keywordSource, createdAt, updatedAt]
           properties:
             id:
               type: string
@@ -1476,6 +1684,12 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/PlatformId"
+            keywords:
+              type: array
+              items:
+                type: string
+            keywordSource:
+              $ref: "#/components/schemas/CrawlerTaskKeywordSource"
             stats:
               $ref: "#/components/schemas/CrawlerStats"
             error:
@@ -1565,6 +1779,21 @@ components:
             allow:
               type: integer
             block:
+              type: integer
+        accountCounts:
+          type: object
+          properties:
+            active:
+              type: integer
+            loginRequired:
+              type: integer
+            expired:
+              type: integer
+            disabled:
+              type: integer
+            error:
+              type: integer
+            unknown:
               type: integer
 
     PlatformListResponse:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 PLATFORM_IDS = ("xhs", "dy", "ks", "bili", "wb", "tieba", "zhihu")
@@ -22,6 +22,15 @@ CRAWLER_STATUSES = (
     "cancelled",
 )
 RUN_MODES = ("topic_extraction", "deep_sentiment", "full_workflow")
+KEYWORD_SOURCES = ("manual", "broad_topic_extraction", "mixed")
+CRAWLER_ACCOUNT_STATUSES = (
+    "active",
+    "login_required",
+    "expired",
+    "disabled",
+    "error",
+    "unknown",
+)
 MASK = "********"
 
 
@@ -131,6 +140,12 @@ class CreateCrawlerTaskRequest(BaseModel):
     runMode: Literal["topic_extraction", "deep_sentiment", "full_workflow"]
     targetDate: str | None = None
     platforms: list[str] = Field(min_length=1)
+    keywords: list[str] = Field(min_length=1, max_length=500)
+    keywordSource: Literal["manual"]
+    maxNotesPerKeyword: int | None = Field(default=None, ge=1, le=1000)
+    maxCommentsPerNote: int | None = Field(default=None, ge=0, le=5000)
+    loginType: Literal["qrcode", "phone", "cookie"] | None = None
+    headless: bool | None = None
     overrides: list[PlatformPolicyInput] = Field(default_factory=list)
     owner: UserRef | None = None
 
@@ -141,6 +156,44 @@ class CreateCrawlerTaskRequest(BaseModel):
         if invalid:
             raise ValueError(f"unsupported platforms: {', '.join(invalid)}")
         return list(dict.fromkeys(value))
+
+    @field_validator("keywords")
+    @classmethod
+    def normalize_keywords(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item and item.strip()]
+        if not normalized:
+            raise ValueError("at least one keyword is required")
+        return list(dict.fromkeys(normalized))
+
+
+class CrawlerAccountUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    platformId: str
+    username: str | None = None
+    displayName: str | None = None
+    avatarUrl: str | None = None
+    profileUrl: str | None = None
+    status: Literal[
+        "active",
+        "login_required",
+        "expired",
+        "disabled",
+        "error",
+        "unknown",
+    ]
+    loginType: Literal["qrcode", "phone", "cookie"] | None = None
+    lastLoginAt: str | None = None
+    lastCheckedAt: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
+
+    @field_validator("platformId")
+    @classmethod
+    def validate_platform_id(cls, value: str) -> str:
+        if value not in PLATFORM_IDS:
+            raise ValueError(f"unsupported platform: {value}")
+        return value
 
 
 class IdentityRuleInput(BaseModel):

@@ -45,6 +45,8 @@ import type {
   ComponentStatus,
   ConfigField,
   ConsoleSnapshot,
+  CrawlerAccountStatus,
+  CrawlerTaskKeywordSource,
   CrawlerTask,
   IdentityListType,
   IdentityRule,
@@ -84,20 +86,33 @@ const platformNames: Record<PlatformId, string> = {
   ks: "快手"
 };
 
+const loginTypeLabels: Record<PlatformPolicy["loginType"], string> = {
+  qrcode: "扫码",
+  phone: "手机号",
+  cookie: "Cookie"
+};
+
 function classNames(...values: Array<string | false | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
-function statusTone(status: TaskStatus | ComponentStatus) {
-  if (status === "running" || status === "succeeded") return "good";
-  if (status === "queued" || status === "pending" || status === "starting" || status === "degraded") {
+function statusTone(status: TaskStatus | ComponentStatus | CrawlerAccountStatus) {
+  if (status === "running" || status === "succeeded" || status === "active") return "good";
+  if (
+    status === "queued" ||
+    status === "pending" ||
+    status === "starting" ||
+    status === "degraded" ||
+    status === "login_required" ||
+    status === "unknown"
+  ) {
     return "warn";
   }
-  if (status === "failed") return "bad";
+  if (status === "failed" || status === "expired" || status === "disabled" || status === "error") return "bad";
   return "idle";
 }
 
-function StatusBadge({ value }: { value: TaskStatus | ComponentStatus }) {
+function StatusBadge({ value }: { value: TaskStatus | ComponentStatus | CrawlerAccountStatus }) {
   return <span className={classNames("status-badge", `tone-${statusTone(value)}`)}>{value}</span>;
 }
 
@@ -191,6 +206,8 @@ export function ConsoleShell() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selectedPlatformId, setSelectedPlatformId] = useState<PlatformId>("wb");
+  const [accountPlatformFilter, setAccountPlatformFilter] = useState<PlatformId | "all">("all");
+  const [accountStatusFilter, setAccountStatusFilter] = useState<CrawlerAccountStatus | "all">("all");
   const [policyDraft, setPolicyDraft] = useState<PlatformPolicy | null>(null);
   const [logSource, setLogSource] = useState<string>("all");
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
@@ -205,15 +222,25 @@ export function ConsoleShell() {
     } satisfies Record<ReportFormat, boolean>
   });
   const [crawlerForm, setCrawlerForm] = useState<{
-    strategyId: string;
     runMode: RunMode;
     targetDate: string;
     platforms: PlatformId[];
+    keywords: string;
+    keywordSource: CrawlerTaskKeywordSource;
+    maxNotesPerKeyword: number;
+    maxCommentsPerNote: number;
+    loginType: PlatformPolicy["loginType"];
+    headless: boolean;
   }>({
-    strategyId: "strategy_daily_hot_topics",
-    runMode: "full_workflow",
+    runMode: "deep_sentiment",
     targetDate: "2026-05-22",
-    platforms: ["wb", "xhs", "zhihu"] as PlatformId[]
+    platforms: ["wb"] as PlatformId[],
+    keywords: "养老服务\n医保支付",
+    keywordSource: "manual",
+    maxNotesPerKeyword: 50,
+    maxCommentsPerNote: 100,
+    loginType: "qrcode",
+    headless: true
   });
   const [identityForm, setIdentityForm] = useState({
     listType: "block" as IdentityListType,
@@ -259,6 +286,12 @@ export function ConsoleShell() {
   const selectedPlatform = snapshot?.platforms.find((item) => item.id === selectedPlatformId) ?? null;
   const selectedRules =
     snapshot?.identityRules.filter((rule) => rule.platformId === selectedPlatformId) ?? [];
+  const filteredCrawlerAccounts =
+    snapshot?.crawlerAccounts.filter((account) => {
+      const platformMatches = accountPlatformFilter === "all" || account.platformId === accountPlatformFilter;
+      const statusMatches = accountStatusFilter === "all" || account.status === accountStatusFilter;
+      return platformMatches && statusMatches;
+    }) ?? [];
   const filteredLogs =
     snapshot?.logs.filter((line) => logSource === "all" || line.source === logSource) ?? [];
 
@@ -302,8 +335,25 @@ export function ConsoleShell() {
     runAction("爬虫任务已创建", async () => {
       if (!snapshot) return;
       if (crawlerForm.platforms.length === 0) throw new Error("至少选择一个平台");
+      const keywords = Array.from(
+        new Set(
+          crawlerForm.keywords
+            .split(/\r?\n|,/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+        )
+      );
+      if (keywords.length === 0) throw new Error("至少输入一个关键词");
       const task = await createCrawlerTask({
-        ...crawlerForm,
+        runMode: crawlerForm.runMode,
+        targetDate: crawlerForm.targetDate,
+        platforms: crawlerForm.platforms,
+        keywords,
+        keywordSource: crawlerForm.keywordSource,
+        maxNotesPerKeyword: crawlerForm.maxNotesPerKeyword,
+        maxCommentsPerNote: crawlerForm.maxCommentsPerNote,
+        loginType: crawlerForm.loginType,
+        headless: crawlerForm.headless,
         owner: currentUser
       });
       setSnapshot({
@@ -655,7 +705,7 @@ export function ConsoleShell() {
           <section className="section-band">
             <SectionHeader
               title="爬虫任务"
-              subtitle="MindSpider 话题提取、深度情感采集与全流程调度"
+              subtitle="指定关键词与平台后发起 MindSpider 采集"
               action={
                 <button
                   className="primary-button"
@@ -667,19 +717,90 @@ export function ConsoleShell() {
                 </button>
               }
             />
-            <div className="form-grid crawler-form">
-              <label className="field">
-                <span>策略</span>
-                <select
-                  value={crawlerForm.strategyId}
-                  onChange={(event) => setCrawlerForm({ ...crawlerForm, strategyId: event.target.value })}
-                >
-                  {snapshot.crawlerStrategies.map((strategy) => (
-                    <option key={strategy.id} value={strategy.id}>
-                      {strategy.name}
-                    </option>
+            <div className="account-panel">
+              <div className="account-panel-title">
+                <div>
+                  <h3>爬虫账号</h3>
+                  <span>{filteredCrawlerAccounts.length} / {snapshot.crawlerAccounts.length} 个账号</span>
+                </div>
+                <div className="account-filters">
+                  <select
+                    value={accountPlatformFilter}
+                    aria-label="账号平台筛选"
+                    onChange={(event) =>
+                      setAccountPlatformFilter(event.target.value === "all" ? "all" : (event.target.value as PlatformId))
+                    }
+                  >
+                    <option value="all">全部平台</option>
+                    {snapshot.platforms.map((platform) => (
+                      <option key={platform.id} value={platform.id}>
+                        {platform.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={accountStatusFilter}
+                    aria-label="账号状态筛选"
+                    onChange={(event) =>
+                      setAccountStatusFilter(
+                        event.target.value === "all" ? "all" : (event.target.value as CrawlerAccountStatus)
+                      )
+                    }
+                  >
+                    <option value="all">全部状态</option>
+                    <option value="active">active</option>
+                    <option value="login_required">login_required</option>
+                    <option value="expired">expired</option>
+                    <option value="disabled">disabled</option>
+                    <option value="error">error</option>
+                    <option value="unknown">unknown</option>
+                  </select>
+                </div>
+              </div>
+              {filteredCrawlerAccounts.length === 0 ? (
+                <EmptyState title="暂无爬虫账号" detail="账号接入后会显示平台、状态、登录方式与校验结果" />
+              ) : (
+                <div className="account-list">
+                  {filteredCrawlerAccounts.map((account) => (
+                    <div className="account-row" key={account.id}>
+                      <div className="account-identity">
+                        <span className="account-avatar" aria-hidden="true">
+                          {account.avatarUrl ? (
+                            <img src={account.avatarUrl} alt="" />
+                          ) : (
+                            (account.displayName ?? account.username ?? account.accountId).slice(0, 1).toUpperCase()
+                          )}
+                        </span>
+                        <div>
+                          <strong>{account.displayName ?? account.username ?? account.accountId}</strong>
+                          <span>{account.username ?? account.accountId}</span>
+                        </div>
+                      </div>
+                      <div className="account-meta">
+                        <span>{platformNames[account.platformId]}</span>
+                        <StatusBadge value={account.status} />
+                      </div>
+                      <div className="account-meta">
+                        <span>{account.loginType ? loginTypeLabels[account.loginType] : "未登记"}</span>
+                        <small>{account.lastCheckedAt ? formatTime(account.lastCheckedAt) : "未校验"}</small>
+                      </div>
+                      <div className="account-detail">
+                        <strong>{account.accountId}</strong>
+                        <span>{account.details?.message ?? "无附加说明"}</span>
+                      </div>
+                    </div>
                   ))}
-                </select>
+                </div>
+              )}
+            </div>
+            <div className="form-grid crawler-form">
+              <label className="field wide">
+                <span>关键词</span>
+                <textarea
+                  value={crawlerForm.keywords}
+                  onChange={(event) => setCrawlerForm({ ...crawlerForm, keywords: event.target.value })}
+                  placeholder="每行一个关键词"
+                />
               </label>
               <label className="field">
                 <span>模式</span>
@@ -689,9 +810,22 @@ export function ConsoleShell() {
                     setCrawlerForm({ ...crawlerForm, runMode: event.target.value as RunMode })
                   }
                 >
-                  <option value="topic_extraction">Topic Extraction</option>
                   <option value="deep_sentiment">Deep Sentiment</option>
                   <option value="full_workflow">Full Workflow</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>关键词来源</span>
+                <select
+                  value={crawlerForm.keywordSource}
+                  onChange={(event) =>
+                    setCrawlerForm({
+                      ...crawlerForm,
+                      keywordSource: event.target.value as CrawlerTaskKeywordSource
+                    })
+                  }
+                >
+                  <option value="manual">Manual</option>
                 </select>
               </label>
               <label className="field">
@@ -701,6 +835,51 @@ export function ConsoleShell() {
                   value={crawlerForm.targetDate}
                   onChange={(event) => setCrawlerForm({ ...crawlerForm, targetDate: event.target.value })}
                 />
+              </label>
+              <label className="field">
+                <span>笔记/关键词</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={crawlerForm.maxNotesPerKeyword}
+                  onChange={(event) =>
+                    setCrawlerForm({ ...crawlerForm, maxNotesPerKeyword: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>评论/笔记</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={5000}
+                  value={crawlerForm.maxCommentsPerNote}
+                  onChange={(event) =>
+                    setCrawlerForm({ ...crawlerForm, maxCommentsPerNote: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>登录方式</span>
+                <select
+                  value={crawlerForm.loginType}
+                  onChange={(event) =>
+                    setCrawlerForm({ ...crawlerForm, loginType: event.target.value as PlatformPolicy["loginType"] })
+                  }
+                >
+                  <option value="qrcode">qrcode</option>
+                  <option value="phone">phone</option>
+                  <option value="cookie">cookie</option>
+                </select>
+              </label>
+              <label className="toggle-pill headless-toggle">
+                <input
+                  type="checkbox"
+                  checked={crawlerForm.headless}
+                  onChange={(event) => setCrawlerForm({ ...crawlerForm, headless: event.target.checked })}
+                />
+                <span>Headless</span>
               </label>
               <div className="platform-checks">
                 {snapshot.platforms.map((platform) => (
@@ -726,9 +905,10 @@ export function ConsoleShell() {
               {snapshot.crawlerTasks.map((task) => (
                 <div className="task-row crawler-row" key={task.id}>
                   <div className="task-main">
-                    <strong>{task.runMode}</strong>
+                    <strong>{task.keywords.slice(0, 3).join(" / ") || task.runMode}</strong>
                     <span>
-                      {task.platforms.map((id) => platformNames[id]).join(" / ")} · {formatTime(task.updatedAt)}
+                      {task.platforms.map((id) => platformNames[id]).join(" / ")} · {task.keywordSource} ·{" "}
+                      {formatTime(task.updatedAt)}
                     </span>
                     <ProgressBar value={task.progress} />
                   </div>

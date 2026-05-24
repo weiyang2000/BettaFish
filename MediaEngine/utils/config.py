@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     MINDSPIDER_BASE_URL: Optional[str] = Field("https://api.deepseek.com", description="MindSpider LLM接口BaseUrl")
     MINDSPIDER_MODEL_NAME: str = Field("deepseek-reasoner", description="MindSpider LLM模型名称，如deepseek-reasoner")
     
-    OUTPUT_DIR: str = Field("reports", description="输出目录")
+    OUTPUT_DIR: str = Field("engine_reports/media", description="输出目录")
     SAVE_INTERMEDIATE_STATES: bool = Field(True, description="是否保存中间状态")
 
     

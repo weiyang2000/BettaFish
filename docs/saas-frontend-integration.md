@@ -2,8 +2,8 @@
 
 This note is the handoff between the Next.js console and the backend migration.
 The canonical API contract is `docs/openapi/saas-platform.yaml`; this file
-summarizes how the legacy Flask app maps into that contract and where mock data
-is used by `apps/web`.
+summarizes how the service-layer adapter maps existing engine capabilities into
+that contract and where mock data is used by `apps/web`.
 
 ## Runtime Model
 
@@ -18,9 +18,9 @@ is used by `apps/web`.
 
 | SaaS path | Legacy source today | Backend note |
 | --- | --- | --- |
-| `GET /api/v1/system/components` | `GET /api/status`, `GET /api/system/status` | Normalize `insight`, `media`, `query`, `forum`, `report`, `mindspider`, and `database` into `SystemComponent[]`. |
-| `POST /api/v1/system/components/{id}:start` | `GET /api/start/{app_name}`, `POST /api/system/start` | Prefer POST in the new API. Component-level and full-system starts can share the same handler. |
-| `POST /api/v1/system/components/{id}:stop` | `GET /api/stop/{app_name}`, `POST /api/system/shutdown` | Return `202` once stop is requested; do not block on long process cleanup. |
+| `GET /api/v1/system/components` | Engine facade runtime state | Normalize `insight`, `media`, `query`, `forum`, `report`, `mindspider`, and `database` into `SystemComponent[]`; component ports are optional infrastructure metadata, not page routes. |
+| `POST /api/v1/system/components/{id}:start` | Engine facade runtime action | Prefer POST. Component-level and full-system starts can share the same handler. |
+| `POST /api/v1/system/components/{id}:stop` | Engine facade runtime action | Return `202` once stop is requested; do not block on long process cleanup. |
 | `GET /api/v1/system/config` | `GET /api/config` | Return config as field metadata and mask sensitive fields. |
 | `PATCH /api/v1/system/config` | `POST /api/config` | Ignore masked placeholders like `********`; never persist masked values as real secrets. |
 | `GET /api/v1/logs` | `GET /api/output/{app}`, `GET /api/forum/log`, `GET /api/report/log` | Add `source`, `level`, `tail`, and cursor support. |

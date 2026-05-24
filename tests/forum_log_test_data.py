@@ -152,6 +152,5 @@ SUMMARY_NODE_JSON_FIX_ERROR = "[11:55:31] 2025-11-06 11:55:31.799 | ERROR    | M
 SUMMARY_NODE_ERROR_LOG = "[11:55:31] 2025-11-06 11:55:31.763 | ERROR    | MediaEngine.nodes.summary_node:process_output:141 - 发生错误：无法处理输出"
 
 # SummaryNode的Traceback错误日志（虽然包含nodes.summary_node，但不应被捕获）
-SUMMARY_NODE_TRACEBACK = """[11:55:31] File "D:\\Programing\\BettaFish\\SingleEngineApp\\..\\MediaEngine\\nodes\\summary_node.py", line 138, in process_output
+SUMMARY_NODE_TRACEBACK = """[11:55:31] File "D:\\Programing\\BettaFish\\MediaEngine\\nodes\\summary_node.py", line 138, in process_output
 [11:55:31] result = json.loads(cleaned_output)"""
-

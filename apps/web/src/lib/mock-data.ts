@@ -54,25 +54,22 @@ export const components: SystemComponent[] = [
     id: "query",
     name: "Query Engine",
     status: "running",
-    port: 8503,
     outputLines: 248,
     lastHeartbeatAt: now,
-    message: "Search API ready"
+    message: "Query dispatch ready"
   },
   {
     id: "media",
     name: "Media Engine",
     status: "running",
-    port: 8502,
     outputLines: 311,
     lastHeartbeatAt: now,
-    message: "Media summaries available"
+    message: "Media retrieval pipeline ready"
   },
   {
     id: "insight",
     name: "Insight Engine",
     status: "degraded",
-    port: 8501,
     outputLines: 402,
     lastHeartbeatAt: now,
     message: "High latency from LLM provider"

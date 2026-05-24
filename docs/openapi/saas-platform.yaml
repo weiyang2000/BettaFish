@@ -5,10 +5,9 @@ info:
   summary: Contract for the BettaFish SaaS service layer.
   description: |
     This contract is the target API for the Next.js SaaS console. It intentionally
-    does not mirror the legacy Flask + Streamlit routes one-for-one. Backend
-    implementations may adapt existing endpoints such as `/api/status`,
-    `/api/config`, `/api/search`, and `/api/report/*`, but the frontend should
-    call the versioned SaaS resources below.
+    does not mirror legacy UI routes one-for-one. Backend implementations may
+    adapt existing engine services, but the frontend should call the versioned
+    SaaS resources below.
 servers:
   - url: http://localhost:8000/api/v1
     description: Local backend service
@@ -885,8 +884,13 @@ components:
           $ref: "#/components/schemas/ComponentStatus"
         port:
           type: integer
+          description: >-
+            Optional infrastructure listener port. It is not a standalone UI
+            sub-application port and must not be used to infer Query, Media, or
+            Insight page URLs.
         healthUrl:
           type: string
+          description: Optional machine-readable health endpoint for the component.
         outputLines:
           type: integer
         lastHeartbeatAt:

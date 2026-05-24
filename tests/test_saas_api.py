@@ -20,6 +20,15 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def test_system_components_do_not_expose_legacy_ui_ports(client: TestClient):
+    response = client.get("/api/v1/system/components", headers=WORKSPACE_HEADERS)
+    assert response.status_code == 200
+
+    components = {component["id"]: component for component in response.json()["components"]}
+    for component_id in ("query", "media", "insight"):
+        assert "port" not in components[component_id]
+
+
 def test_system_config_masks_secrets_and_ignores_mask_placeholder(client: TestClient):
     response = client.patch(
         "/api/v1/system/config",

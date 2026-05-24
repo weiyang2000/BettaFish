@@ -87,11 +87,11 @@ def get_latest_engine_reports() -> Dict[str, str]:
     logger.info("步骤 2/4: 获取最新的分析引擎报告")
     logger.info("=" * 70)
 
-    # 定义三个引擎的目录
+    # 定义三个引擎的报告目录
     directories = {
-        'insight': 'insight_engine_streamlit_reports',
-        'media': 'media_engine_streamlit_reports',
-        'query': 'query_engine_streamlit_reports'
+        'insight': 'engine_reports/insight',
+        'media': 'engine_reports/media',
+        'query': 'engine_reports/query'
     }
 
     latest_files = {}

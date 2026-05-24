@@ -19,14 +19,6 @@ COMPONENT_NAMES = {
     "database": "Database",
 }
 
-COMPONENT_PORTS = {
-    "insight": 8501,
-    "media": 8502,
-    "query": 8503,
-    "report": 5000,
-}
-
-
 class EngineFacade:
     """Thin boundary between the SaaS API and legacy engine/runtime files."""
 
@@ -48,8 +40,6 @@ class EngineFacade:
                 "lastHeartbeatAt": now if status in {"running", "degraded"} else None,
                 "message": self._message(component_id, status),
             }
-            if component_id in COMPONENT_PORTS:
-                item["port"] = COMPONENT_PORTS[component_id]
             output_lines = self._count_output_lines(component_id)
             if output_lines:
                 item["outputLines"] = output_lines
@@ -196,4 +186,3 @@ class EngineFacade:
         if "DEBUG" in upper:
             return "debug"
         return "info"
-

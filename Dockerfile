@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/root/.local/bin:${PATH}" \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Install system dependencies required by scientific Python stack, Playwright, Streamlit, and WeasyPrint PDF
+# Install system dependencies required by the scientific Python stack, Playwright, and WeasyPrint PDF
 RUN set -euo pipefail; \
     apt-get update; \
     if apt-cache show libgdk-pixbuf-2.0-0 >/dev/null 2>&1; then \
@@ -69,9 +69,9 @@ COPY .env.example .env
 COPY . .
 
 # Ensure runtime directories exist even if ignored in build context
-RUN mkdir -p /ms-playwright logs final_reports insight_engine_streamlit_reports media_engine_streamlit_reports query_engine_streamlit_reports
+RUN mkdir -p /ms-playwright logs final_reports engine_reports
 
-EXPOSE 5000 8000 8501 8502 8503
+EXPOSE 8000
 
-# Default command launches the Flask orchestrator which starts Streamlit agents
-CMD ["python", "app.py"]
+# Default command launches the FastAPI service layer
+CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

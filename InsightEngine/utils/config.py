@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     DEFAULT_SEARCH_TOPIC_ON_PLATFORM_LIMIT: int = Field(200, description="平台搜索话题最大数")
     MAX_SEARCH_RESULTS_FOR_LLM: int = Field(0, description="供LLM用搜索结果最大数")
     MAX_HIGH_CONFIDENCE_SENTIMENT_RESULTS: int = Field(0, description="高置信度情感分析最大数")
-    OUTPUT_DIR: str = Field("reports", description="输出路径")
+    OUTPUT_DIR: str = Field("engine_reports/insight", description="输出路径")
     SAVE_INTERMEDIATE_STATES: bool = Field(True, description="是否保存中间状态")
 
     class Config:

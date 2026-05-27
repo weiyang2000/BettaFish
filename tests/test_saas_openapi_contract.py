@@ -1,3 +1,5 @@
+import asyncio
+import json
 import re
 import sys
 import time
@@ -12,6 +14,11 @@ from fastapi.testclient import TestClient
 from apps.api.main import create_app
 from apps.api.services.tasks import TaskService
 from apps.api.storage import Store
+from MindSpider.DeepSentimentCrawling.mediacrawler_hooks.identity_filter import (
+    BlocklistStoreProxy,
+    filter_records,
+    normalize_block_rules,
+)
 
 
 WORKSPACE_HEADERS = {"X-Workspace-Id": "workspace_contract"}
@@ -131,12 +138,11 @@ def test_contract_error_cases_return_structured_errors(client: TestClient):
     assert premature_result.status_code == 409
     assert premature_result.json()["error"]["code"] == "EXPORT_UNAVAILABLE"
 
-    allow = {"listType": "allow", "userId": "contract-user"}
     block = {"listType": "block", "userId": "contract-user"}
     assert client.post(
         "/api/v1/platforms/wb/identity-lists",
         headers=WORKSPACE_HEADERS,
-        json=allow,
+        json=block,
     ).status_code == 201
     conflict = client.post(
         "/api/v1/platforms/wb/identity-lists",
@@ -250,6 +256,7 @@ def test_real_crawler_adapter_invokes_keyword_platform_api(
             *,
             login_type: str,
             max_notes_per_keyword: int,
+            block_rules_by_platform: dict[str, list[dict[str, Any]]],
         ) -> dict[str, Any]:
             calls.append(
                 {
@@ -257,6 +264,10 @@ def test_real_crawler_adapter_invokes_keyword_platform_api(
                     "platforms": platforms,
                     "loginType": login_type,
                     "maxNotesPerKeyword": max_notes_per_keyword,
+                    "blockRuleUsers": {
+                        platform: [rule["userId"] for rule in rules]
+                        for platform, rules in block_rules_by_platform.items()
+                    },
                 }
             )
             return {
@@ -267,12 +278,16 @@ def test_real_crawler_adapter_invokes_keyword_platform_api(
                 "failed_tasks": 0,
                 "total_notes": 12,
                 "total_comments": 30,
+                "filtered_notes": 2,
+                "filtered_comments": 1,
                 "platform_summary": {
                     platform: {
                         "successful_keywords": len(keywords),
                         "failed_keywords": 0,
                         "total_notes": 6,
                         "total_comments": 15,
+                        "filtered_notes": 2 if platform == "wb" else 0,
+                        "filtered_comments": 1 if platform == "wb" else 0,
                     }
                     for platform in platforms
                 },
@@ -291,8 +306,24 @@ def test_real_crawler_adapter_invokes_keyword_platform_api(
         tmp_path / "artifacts",
         run_workers=False,
     )
+    service.store.execute(
+        """
+        INSERT INTO crawler_identity_rules (
+            id, workspace_id, platform_id, list_type, user_id, label,
+            reason, expires_at, created_at, created_by_json
+        ) VALUES
+            ('identity_block_wb', 'workspace_contract', 'wb', 'block',
+             'blocked-wb-user', NULL, NULL, NULL, '2026-05-27T00:00:00Z', NULL),
+            ('identity_allow_wb', 'workspace_contract', 'wb', 'allow',
+             'legacy-allow-user', NULL, NULL, NULL, '2026-05-27T00:00:00Z', NULL),
+            ('identity_block_xhs_expired', 'workspace_contract', 'xhs', 'block',
+             'expired-xhs-user', NULL, NULL, '2020-01-01T00:00:00Z',
+             '2026-05-27T00:00:00Z', NULL)
+        """,
+    )
     stats = service._run_real_crawler(
         {
+            "workspaceId": "workspace_contract",
             "keywords": ["养老服务", "医保支付"],
             "platforms": ["wb", "xhs"],
             "loginType": "phone",
@@ -306,12 +337,108 @@ def test_real_crawler_adapter_invokes_keyword_platform_api(
             "platforms": ["wb", "xhs"],
             "loginType": "phone",
             "maxNotesPerKeyword": 7,
+            "blockRuleUsers": {"wb": ["blocked-wb-user"], "xhs": []},
         }
     ]
     assert stats["totalKeywords"] == 2
     assert stats["totalPlatforms"] == 2
     assert stats["totalTasks"] == 4
     assert stats["platformSummary"]["wb"]["totalNotes"] == 6
+    assert stats["filteredNotes"] == 2
+    assert stats["filteredComments"] == 1
+    assert stats["platformSummary"]["wb"]["filteredNotes"] == 2
+    assert stats["platformSummary"]["wb"]["filteredComments"] == 1
+    assert stats["platformSummary"]["xhs"]["filteredNotes"] == 0
+
+
+def test_identity_blocklist_filter_uses_stable_ids_and_legacy_allow_is_ignored():
+    rules = normalize_block_rules(
+        {
+            "dy": [
+                {"listType": "allow", "userId": "sec-user-001"},
+                {"listType": "block", "userId": "author-002"},
+            ],
+            "tieba": [{"listType": "block", "userId": "贴吧昵称"}],
+        }
+    )
+
+    kept, dropped = filter_records(
+        "dy",
+        [
+            {"sec_uid": "sec-user-001", "note_id": "legacy-allow-passes"},
+            {"author_id": "author-002", "note_id": "blocked-stable-author"},
+            {"nickname": "author-002", "note_id": "nickname-not-stable"},
+        ],
+        rules,
+    )
+    assert dropped == 1
+    assert [record["note_id"] for record in kept] == [
+        "legacy-allow-passes",
+        "nickname-not-stable",
+    ]
+
+    kept, dropped = filter_records(
+        "tieba",
+        [
+            {"user_nickname": "贴吧昵称"},
+            {"user_nickname": "其他用户"},
+        ],
+        rules,
+    )
+    assert dropped == 1
+    assert kept == [{"user_nickname": "其他用户"}]
+
+
+def test_blocklist_store_proxy_drops_records_before_delegate_write(tmp_path: Path):
+    stored: list[tuple[str, dict[str, Any]]] = []
+
+    class FakeStore:
+        async def store_content(self, content_item: dict[str, Any]) -> None:
+            stored.append(("content", content_item))
+
+        async def store_comment(self, comment_item: dict[str, Any]) -> None:
+            stored.append(("comment", comment_item))
+
+    stats_path = tmp_path / "filter_stats.json"
+    rules = normalize_block_rules(
+        {
+            "wb": [
+                {"listType": "block", "userId": "content-block"},
+                {"listType": "block", "userId": "comment-block"},
+            ],
+            "xhs": [{"listType": "block", "userId": "xhs-comment-block"}],
+        }
+    )
+    wb_proxy = BlocklistStoreProxy(
+        FakeStore(),
+        "wb",
+        rules,
+        stats_path=str(stats_path),
+    )
+    xhs_proxy = BlocklistStoreProxy(
+        FakeStore(),
+        "xhs",
+        rules,
+        stats_path=str(stats_path),
+    )
+
+    asyncio.run(wb_proxy.store_content({"user_id": "content-block", "note_id": "n1"}))
+    asyncio.run(wb_proxy.store_content({"user_id": "content-ok", "note_id": "n2"}))
+    asyncio.run(wb_proxy.store_comment({"user_id": "comment-block", "comment_id": "c1"}))
+    asyncio.run(wb_proxy.store_comment({"user_id": "comment-ok", "comment_id": "c2"}))
+    asyncio.run(xhs_proxy.store_comment({"user_id": "xhs-comment-block", "comment_id": "c3"}))
+
+    assert stored == [
+        ("content", {"user_id": "content-ok", "note_id": "n2"}),
+        ("comment", {"user_id": "comment-ok", "comment_id": "c2"}),
+    ]
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    assert stats["platform_summary"]["wb"]["filtered_notes"] == 1
+    assert stats["platform_summary"]["wb"]["filtered_comments"] == 1
+    assert stats["platform_summary"]["xhs"]["filtered_notes"] == 0
+    assert stats["platform_summary"]["xhs"]["filtered_comments"] == 1
+    assert stats["filtered_notes"] == 1
+    assert stats["filtered_comments"] == 2
 
 
 def _normalize_path(path: str) -> str:

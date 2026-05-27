@@ -48,7 +48,6 @@ import type {
   CrawlerAccountStatus,
   CrawlerTaskKeywordSource,
   CrawlerTask,
-  IdentityListType,
   IdentityRule,
   Platform,
   PlatformId,
@@ -243,7 +242,6 @@ export function ConsoleShell() {
     headless: true
   });
   const [identityForm, setIdentityForm] = useState({
-    listType: "block" as IdentityListType,
     userId: "",
     label: "",
     reason: ""
@@ -285,7 +283,10 @@ export function ConsoleShell() {
 
   const selectedPlatform = snapshot?.platforms.find((item) => item.id === selectedPlatformId) ?? null;
   const selectedRules =
-    snapshot?.identityRules.filter((rule) => rule.platformId === selectedPlatformId) ?? [];
+    snapshot?.identityRules.filter((rule) => rule.platformId === selectedPlatformId && rule.listType === "block") ?? [];
+  const selectedLegacyAllowRuleCount =
+    snapshot?.identityRules.filter((rule) => rule.platformId === selectedPlatformId && rule.listType === "allow").length ??
+    0;
   const filteredCrawlerAccounts =
     snapshot?.crawlerAccounts.filter((account) => {
       const platformMatches = accountPlatformFilter === "all" || account.platformId === accountPlatformFilter;
@@ -381,13 +382,13 @@ export function ConsoleShell() {
     });
 
   const addIdentity = () =>
-    runAction("名单规则已添加", async () => {
+    runAction("黑名单规则已添加", async () => {
       if (!snapshot) return;
       const userId = identityForm.userId.trim();
       if (!userId) throw new Error("用户 ID 不能为空");
       const rule = await createIdentityRule({
         platformId: selectedPlatformId,
-        listType: identityForm.listType,
+        listType: "block",
         userId,
         label: identityForm.label.trim(),
         reason: identityForm.reason.trim(),
@@ -412,7 +413,7 @@ export function ConsoleShell() {
     });
 
   const removeIdentity = (rule: IdentityRule) =>
-    runAction("名单规则已删除", async () => {
+    runAction("黑名单规则已删除", async () => {
       if (!snapshot) return;
       await deleteIdentityRule(rule.platformId, rule.id);
       setSnapshot({
@@ -551,7 +552,7 @@ export function ConsoleShell() {
               <MetricTile
                 label="屏蔽用户"
                 value={String(metrics.blockedUsers)}
-                detail="跨平台 identity rules"
+                detail="跨平台黑名单规则"
                 icon={Shield}
               />
             </div>
@@ -946,7 +947,7 @@ export function ConsoleShell() {
           <section className="section-band">
             <SectionHeader
               title="平台策略"
-              subtitle="平台级爬取深度、关键词、评论数量与用户名单"
+              subtitle="平台级爬取深度、关键词、评论数量与用户黑名单"
               action={
                 <button className="primary-button" onClick={() => void savePolicy()} disabled={!policyDraft}>
                   <Save size={16} />
@@ -964,7 +965,7 @@ export function ConsoleShell() {
                   >
                     <strong>{platform.name}</strong>
                     <span>
-                      allow {platform.identityRuleCounts.allow} · block {platform.identityRuleCounts.block}
+                      黑名单 {platform.identityRuleCounts.block}
                     </span>
                   </button>
                 ))}
@@ -1074,17 +1075,8 @@ export function ConsoleShell() {
                     </label>
                   </div>
                   <div className="identity-manager">
-                    <h3>用户名单</h3>
+                    <h3>用户黑名单</h3>
                     <div className="identity-form">
-                      <select
-                        value={identityForm.listType}
-                        onChange={(event) =>
-                          setIdentityForm({ ...identityForm, listType: event.target.value as IdentityListType })
-                        }
-                      >
-                        <option value="block">block</option>
-                        <option value="allow">allow</option>
-                      </select>
                       <input
                         value={identityForm.userId}
                         onChange={(event) => setIdentityForm({ ...identityForm, userId: event.target.value })}
@@ -1097,23 +1089,28 @@ export function ConsoleShell() {
                       />
                       <button className="secondary-button" onClick={() => void addIdentity()}>
                         <Shield size={16} />
-                        添加
+                        添加黑名单
                       </button>
                     </div>
+                    {selectedLegacyAllowRuleCount > 0 && (
+                      <p className="identity-legacy-note">
+                        已忽略 {selectedLegacyAllowRuleCount} 条历史白名单规则，白名单不参与爬虫过滤。
+                      </p>
+                    )}
                     {selectedRules.length === 0 ? (
-                      <EmptyState title="暂无名单规则" detail="allow/block 规则会影响爬取与素材筛选" />
+                      <EmptyState title="暂无黑名单规则" detail="黑名单规则会在日过滤后、入库前排除匹配用户内容" />
                     ) : (
                       <div className="rule-list">
                         {selectedRules.map((rule) => (
                           <div className="rule-row" key={rule.id}>
-                            <StatusBadge value={rule.listType === "allow" ? "running" : "stopped"} />
+                            <span className="status-badge tone-bad">黑名单</span>
                             <div>
                               <strong>{rule.userId}</strong>
                               <span>{rule.label || rule.reason || "未填写说明"}</span>
                             </div>
                             <button
                               className="icon-button danger"
-                              title="删除名单规则"
+                              title="删除黑名单规则"
                               onClick={() => void removeIdentity(rule)}
                             >
                               <Trash2 size={16} />

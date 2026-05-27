@@ -5,10 +5,18 @@ test.skip(process.env.NEXT_PUBLIC_USE_MOCKS !== "false", "real API coverage requ
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4010/api/v1";
 const timestamp = "2026-05-22T10:00:00Z";
 
-test("loads and deletes existing identity rules through real API routes", async ({ page }) => {
+test("loads blacklist rules and ignores legacy allow rules through real API routes", async ({ page }) => {
   const identityRequests: string[] = [];
   const deleteRequests: string[] = [];
-  let wbRules = [
+  const createPayloads: Array<Record<string, unknown>> = [];
+  let wbRules: Array<{
+    id: string;
+    platformId: string;
+    listType: "allow" | "block";
+    userId: string;
+    label: string;
+    createdAt: string;
+  }> = [
     {
       id: "identity_wb_block_001",
       platformId: "wb",
@@ -105,6 +113,34 @@ test("loads and deletes existing identity rules through real API routes", async 
     const requestUrl = new URL(route.request().url());
     const parts = requestUrl.pathname.split("/");
     const platformId = parts[parts.indexOf("platforms") + 1];
+    if (route.request().method() === "POST") {
+      const payload = route.request().postDataJSON() as {
+        listType: "allow" | "block";
+        userId: string;
+        label?: string;
+      };
+      createPayloads.push(payload);
+      const rule = {
+        id: "identity_wb_block_002",
+        platformId,
+        listType: payload.listType,
+        userId: payload.userId,
+        label: payload.label ?? "",
+        createdAt: timestamp
+      };
+      wbRules = [rule, ...wbRules];
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          rule
+        })
+      });
+      return;
+    }
+
+    expect(route.request().method()).toBe("GET");
     identityRequests.push(platformId);
     await route.fulfill({
       status: 200,
@@ -131,12 +167,26 @@ test("loads and deletes existing identity rules through real API routes", async 
   expect(identityRequests).toEqual(["wb", "xhs"]);
   await expect(page.getByText("blocked_existing_001")).toBeVisible();
   await expect(page.getByText("既有屏蔽用户")).toBeVisible();
-  await expect(page.getByText("allowed_existing_002")).toBeVisible();
+  await expect(page.getByText("allowed_existing_002")).toHaveCount(0);
+  await expect(page.getByText("已忽略 1 条历史白名单规则，白名单不参与爬虫过滤。")).toBeVisible();
 
-  await page.locator(".rule-row", { hasText: "blocked_existing_001" }).getByTitle("删除名单规则").click();
-  await expect(page.getByText("名单规则已删除")).toBeVisible();
+  await page.locator(".rule-row", { hasText: "blocked_existing_001" }).getByTitle("删除黑名单规则").click();
+  await expect(page.getByText("黑名单规则已删除")).toBeVisible();
   await expect(page.getByText("blocked_existing_001")).toHaveCount(0);
   expect(deleteRequests).toHaveLength(1);
+
+  await page.getByPlaceholder("平台用户 ID").fill("blocked_existing_002");
+  await page.getByPlaceholder("标签").fill("新增黑名单用户");
+  await page.getByRole("button", { name: "添加黑名单" }).click();
+  await expect(page.getByText("黑名单规则已添加")).toBeVisible();
+  await expect(page.getByText("blocked_existing_002")).toBeVisible();
+  expect(createPayloads).toEqual([
+    expect.objectContaining({
+      listType: "block",
+      userId: "blocked_existing_002",
+      label: "新增黑名单用户"
+    })
+  ]);
 });
 
 test("creates crawler tasks with explicit keywords and selected platforms", async ({ page }) => {

@@ -323,7 +323,7 @@ export const platforms: Platform[] = [
     }),
     identityRuleCounts: {
       allow: 1,
-      block: 2
+      block: 1
     }
   },
   {
@@ -366,7 +366,7 @@ export const platforms: Platform[] = [
       maxCommentsPerNote: 80
     }),
     identityRuleCounts: {
-      allow: 2,
+      allow: 0,
       block: 0
     }
   },

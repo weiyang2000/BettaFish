@@ -197,7 +197,7 @@ class CrawlerAccountUpsertRequest(BaseModel):
 
 
 class IdentityRuleInput(BaseModel):
-    listType: Literal["allow", "block"]
+    listType: Literal["allow", "block"] = "block"
     userId: str = Field(min_length=1)
     label: str | None = None
     reason: str | None = None

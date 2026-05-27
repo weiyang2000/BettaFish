@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 import json
 from loguru import logger
 
@@ -23,6 +23,10 @@ try:
     import config
 except ImportError:
     raise ImportError("无法导入config.py配置文件")
+
+
+BLOCK_RULES_ENV = "BETTAFISH_BLOCK_RULES_JSON"
+BLOCK_STATS_ENV = "BETTAFISH_BLOCK_STATS_PATH"
 
 class PlatformCrawler:
     """平台爬虫管理器"""
@@ -234,9 +238,60 @@ postgres_db_config = {{
         except Exception as e:
             logger.exception(f"创建基础配置失败: {e}")
             return False
+
+    def _new_block_stats_path(self) -> str:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix="bettafish_block_stats_",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            json.dump({"platform_summary": {}}, handle)
+            return handle.name
+
+    def _with_blocklist_hook_env(
+        self,
+        env: Dict[str, str],
+        platform: str,
+        block_rules: List[Dict[str, Any]],
+        stats_path: str,
+    ) -> Dict[str, str]:
+        hook_path = Path(__file__).parent / "mediacrawler_hooks"
+        next_env = dict(env)
+        next_env[BLOCK_RULES_ENV] = json.dumps(
+            {platform: block_rules},
+            ensure_ascii=False,
+        )
+        next_env[BLOCK_STATS_ENV] = stats_path
+        existing_pythonpath = next_env.get("PYTHONPATH")
+        next_env["PYTHONPATH"] = (
+            f"{hook_path}{os.pathsep}{existing_pythonpath}"
+            if existing_pythonpath
+            else str(hook_path)
+        )
+        return next_env
+
+    def _read_block_stats(self, stats_path: str | None, platform: str) -> Dict[str, int]:
+        if not stats_path:
+            return {"filtered_notes_count": 0, "filtered_comments_count": 0}
+        path = Path(stats_path)
+        if not path.exists():
+            return {"filtered_notes_count": 0, "filtered_comments_count": 0}
+        try:
+            stats = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError:
+            return {"filtered_notes_count": 0, "filtered_comments_count": 0}
+
+        summary = stats.get("platform_summary", {}).get(platform, {})
+        return {
+            "filtered_notes_count": summary.get("filtered_notes", 0),
+            "filtered_comments_count": summary.get("filtered_comments", 0),
+        }
     
     def run_crawler(self, platform: str, keywords: List[str], 
-                   login_type: str = "qrcode", max_notes: int = 50) -> Dict:
+                   login_type: str = "qrcode", max_notes: int = 50,
+                   block_rules: Optional[List[Dict[str, Any]]] = None) -> Dict:
         """
         运行爬虫
         
@@ -245,6 +300,7 @@ postgres_db_config = {{
             keywords: 关键词列表
             login_type: 登录方式
             max_notes: 最大爬取数量
+            block_rules: 当前平台要在入库前过滤的身份黑名单规则
         
         Returns:
             爬取结果统计
@@ -260,6 +316,7 @@ postgres_db_config = {{
         logger.info(start_message)
         
         start_time = datetime.now()
+        stats_path: str | None = None
         
         try:
             # 配置数据库
@@ -284,6 +341,20 @@ postgres_db_config = {{
                 "--save_data_option", save_data_option,
                 "--headless", "false"
             ]
+
+            env = os.environ.copy()
+            if block_rules:
+                stats_path = self._new_block_stats_path()
+                env = self._with_blocklist_hook_env(
+                    env,
+                    platform,
+                    block_rules,
+                    stats_path,
+                )
+                # MediaCrawler persists inside the subprocess. We inject a
+                # sitecustomize hook that wraps its store factories and drops
+                # matching records before store_content/store_comment writes.
+                logger.info(f"已启用 {platform} 平台身份黑名单入库前过滤")
             
             logger.info(f"执行命令: {' '.join(cmd)}")
             
@@ -291,7 +362,8 @@ postgres_db_config = {{
             result = subprocess.run(
                 cmd,
                 cwd=self.mediacrawler_path,
-                timeout=3600  # 60分钟超时
+                timeout=3600,  # 60分钟超时
+                env=env,
             )
             
             end_time = datetime.now()
@@ -308,7 +380,8 @@ postgres_db_config = {{
                 "success": result.returncode == 0,
                 "notes_count": 0,
                 "comments_count": 0,
-                "errors_count": 0
+                "errors_count": 0,
+                **self._read_block_stats(stats_path, platform),
             }
             
             # 保存统计信息
@@ -323,10 +396,23 @@ postgres_db_config = {{
             
         except subprocess.TimeoutExpired:
             logger.exception(f"❌ {platform} 爬取超时")
-            return {"success": False, "error": "爬取超时", "platform": platform}
+            return {
+                "success": False,
+                "error": "爬取超时",
+                "platform": platform,
+                **self._read_block_stats(stats_path, platform),
+            }
         except Exception as e:
             logger.exception(f"❌ {platform} 爬取异常: {e}")
-            return {"success": False, "error": str(e), "platform": platform}
+            return {
+                "success": False,
+                "error": str(e),
+                "platform": platform,
+                **self._read_block_stats(stats_path, platform),
+            }
+        finally:
+            if stats_path:
+                Path(stats_path).unlink(missing_ok=True)
     
     def _parse_crawl_output(self, output_lines: List[str], error_lines: List[str]) -> Dict:
         """解析爬取输出，提取统计信息"""
@@ -367,7 +453,8 @@ postgres_db_config = {{
         return stats
     
     def run_multi_platform_crawl_by_keywords(self, keywords: List[str], platforms: List[str],
-                                            login_type: str = "qrcode", max_notes_per_keyword: int = 50) -> Dict:
+                                            login_type: str = "qrcode", max_notes_per_keyword: int = 50,
+                                            block_rules_by_platform: Optional[Dict[str, List[Dict[str, Any]]]] = None) -> Dict:
         """
         基于关键词的多平台爬取 - 每个关键词在所有平台上都进行爬取
         
@@ -376,6 +463,7 @@ postgres_db_config = {{
             platforms: 平台列表
             login_type: 登录方式
             max_notes_per_keyword: 每个关键词在每个平台的最大爬取数量
+            block_rules_by_platform: 按平台传入的身份黑名单规则，仅用于入库前过滤
         
         Returns:
             总体爬取统计
@@ -388,6 +476,13 @@ postgres_db_config = {{
         start_message += f"\n   每个关键词在每个平台的最大爬取数量: {max_notes_per_keyword}"
         start_message += f"\n   总爬取任务: {len(keywords)} × {len(platforms)} = {len(keywords) * len(platforms)}"
         logger.info(start_message)
+        block_rules_by_platform = block_rules_by_platform or {}
+        block_rule_counts = {
+            platform: len(block_rules_by_platform.get(platform, []))
+            for platform in platforms
+        }
+        if any(block_rule_counts.values()):
+            logger.info(f"平台身份黑名单规则数量: {block_rule_counts}")
         
         total_stats = {
             "total_keywords": len(keywords),
@@ -397,6 +492,8 @@ postgres_db_config = {{
             "failed_tasks": 0,
             "total_notes": 0,
             "total_comments": 0,
+            "filtered_notes": 0,
+            "filtered_comments": 0,
             "keyword_results": {},
             "platform_summary": {}
         }
@@ -407,7 +504,9 @@ postgres_db_config = {{
                 "successful_keywords": 0,
                 "failed_keywords": 0,
                 "total_notes": 0,
-                "total_comments": 0
+                "total_comments": 0,
+                "filtered_notes": 0,
+                "filtered_comments": 0
             }
         
         # 对每个平台一次性爬取所有关键词
@@ -417,7 +516,19 @@ postgres_db_config = {{
             
             try:
                 # 一次性传递所有关键词给平台
-                result = self.run_crawler(platform, keywords, login_type, max_notes_per_keyword)
+                result = self.run_crawler(
+                    platform,
+                    keywords,
+                    login_type,
+                    max_notes_per_keyword,
+                    block_rules=block_rules_by_platform.get(platform, []),
+                )
+                filtered_notes_count = result.get("filtered_notes_count", 0)
+                filtered_comments_count = result.get("filtered_comments_count", 0)
+                total_stats["filtered_notes"] += filtered_notes_count
+                total_stats["filtered_comments"] += filtered_comments_count
+                total_stats["platform_summary"][platform]["filtered_notes"] = filtered_notes_count
+                total_stats["platform_summary"][platform]["filtered_comments"] = filtered_comments_count
                 
                 if result.get("success"):
                     total_stats["successful_tasks"] += len(keywords)
@@ -453,7 +564,12 @@ postgres_db_config = {{
             except Exception as e:
                 total_stats["failed_tasks"] += len(keywords)
                 total_stats["platform_summary"][platform]["failed_keywords"] = len(keywords)
-                error_result = {"success": False, "error": str(e)}
+                error_result = {
+                    "success": False,
+                    "error": str(e),
+                    "filtered_notes_count": 0,
+                    "filtered_comments_count": 0,
+                }
                 
                 # 为每个关键词记录异常结果
                 for keyword in keywords:

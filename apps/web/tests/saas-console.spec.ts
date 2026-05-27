@@ -83,18 +83,23 @@ test("filters crawler accounts by platform and status with empty state", async (
   await expect(page.getByText("短视频监测")).toBeVisible();
 });
 
-test("validates identity list input and adds a platform rule", async ({ page }) => {
+test("validates blacklist input and adds a platform blacklist rule", async ({ page }) => {
   await openConsole(page);
   await page.getByRole("button", { name: "平台规则" }).click();
 
-  await page.getByRole("button", { name: "添加" }).click();
+  await expect(page.locator(".identity-form select")).toHaveCount(0);
+  await expect(page.getByText("spam_7788")).toBeVisible();
+  await expect(page.getByText("gov_service_account")).toHaveCount(0);
+  await expect(page.getByText("已忽略 1 条历史白名单规则，白名单不参与爬虫过滤。")).toBeVisible();
+
+  await page.getByRole("button", { name: "添加黑名单" }).click();
   await expect(page.getByText("用户 ID 不能为空")).toBeVisible();
 
   await page.getByPlaceholder("平台用户 ID").fill("blocked_user_005");
   await page.getByPlaceholder("标签").fill("测试屏蔽用户");
-  await page.getByRole("button", { name: "添加" }).click();
+  await page.getByRole("button", { name: "添加黑名单" }).click();
 
-  await expect(page.getByText("名单规则已添加")).toBeVisible();
+  await expect(page.getByText("黑名单规则已添加")).toBeVisible();
   await expect(page.getByText("blocked_user_005")).toBeVisible();
   await expect(page.getByText("测试屏蔽用户")).toBeVisible();
 });

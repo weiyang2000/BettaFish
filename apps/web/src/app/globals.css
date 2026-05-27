@@ -814,9 +814,18 @@ a {
 .identity-form {
   padding: 14px;
   display: grid;
-  grid-template-columns: 120px 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 10px;
   border-bottom: 1px solid var(--line);
+}
+
+.identity-legacy-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  background: #f5f8f5;
+  font-size: 13px;
 }
 
 .rule-row {

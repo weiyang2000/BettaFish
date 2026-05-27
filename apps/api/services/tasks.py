@@ -17,6 +17,7 @@ from apps.api.schemas import (
     UserRef,
 )
 from apps.api.services.common import new_id, slugify_filename, utc_now
+from apps.api.services.platforms import load_active_block_rules
 from apps.api.storage import Store, dumps, loads
 
 
@@ -307,6 +308,8 @@ class TaskService:
             "failedTasks": 0,
             "totalNotes": 0,
             "totalComments": 0,
+            "filteredNotes": 0,
+            "filteredComments": 0,
             "platformSummary": {},
         }
         self.store.execute(
@@ -559,13 +562,25 @@ class TaskService:
         from MindSpider.DeepSentimentCrawling.platform_crawler import PlatformCrawler
 
         crawler = PlatformCrawler()
+        block_rules_by_platform = self._load_crawler_block_rules(task)
         result = crawler.run_multi_platform_crawl_by_keywords(
             task["keywords"],
             task["platforms"],
             login_type=task.get("loginType") or "qrcode",
             max_notes_per_keyword=task.get("maxNotesPerKeyword") or 50,
+            block_rules_by_platform=block_rules_by_platform,
         )
         return self._real_crawler_stats_to_api(result)
+
+    def _load_crawler_block_rules(
+        self,
+        task: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        workspace_id = task.get("workspaceId")
+        platforms = task.get("platforms", [])
+        if not workspace_id or not platforms:
+            return {platform: [] for platform in platforms}
+        return load_active_block_rules(self.store, workspace_id, platforms)
 
     @staticmethod
     def _real_crawler_stats_to_api(result: dict[str, Any]) -> dict[str, Any]:
@@ -576,7 +591,17 @@ class TaskService:
                 "failedKeywords": summary.get("failed_keywords", 0),
                 "totalNotes": summary.get("total_notes", 0),
                 "totalComments": summary.get("total_comments", 0),
+                "filteredNotes": summary.get("filtered_notes", 0),
+                "filteredComments": summary.get("filtered_comments", 0),
             }
+        filtered_notes = result.get(
+            "filtered_notes",
+            sum(item["filteredNotes"] for item in platform_summary.values()),
+        )
+        filtered_comments = result.get(
+            "filtered_comments",
+            sum(item["filteredComments"] for item in platform_summary.values()),
+        )
         return {
             "totalKeywords": result.get("total_keywords", 0),
             "totalPlatforms": result.get("total_platforms", 0),
@@ -585,6 +610,8 @@ class TaskService:
             "failedTasks": result.get("failed_tasks", 0),
             "totalNotes": result.get("total_notes", 0),
             "totalComments": result.get("total_comments", 0),
+            "filteredNotes": filtered_notes,
+            "filteredComments": filtered_comments,
             "platformSummary": platform_summary,
         }
 
@@ -602,12 +629,16 @@ class TaskService:
             "failedTasks": 0,
             "totalNotes": total_tasks * 10,
             "totalComments": total_tasks * 50,
+            "filteredNotes": 0,
+            "filteredComments": 0,
             "platformSummary": {
                 platform: {
                     "successfulKeywords": total_keywords,
                     "failedKeywords": 0,
                     "totalNotes": total_keywords * 10,
                     "totalComments": total_keywords * 50,
+                    "filteredNotes": 0,
+                    "filteredComments": 0,
                 }
                 for platform in platforms
             },

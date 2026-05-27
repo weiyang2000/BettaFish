@@ -22,6 +22,45 @@ PLATFORM_NAMES = {
 }
 
 
+def load_active_block_rules(
+    store: Store,
+    workspace_id: str,
+    platform_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Load active crawler identity block rules, ignoring legacy allow rows."""
+    platforms = list(dict.fromkeys(platform_ids))
+    if not platforms:
+        return {}
+
+    placeholders = ", ".join("?" for _ in platforms)
+    rows = store.query_all(
+        f"""
+        SELECT id, platform_id, user_id, label, reason, expires_at
+        FROM crawler_identity_rules
+        WHERE workspace_id = ?
+            AND list_type = 'block'
+            AND platform_id IN ({placeholders})
+            AND (expires_at IS NULL OR expires_at = '' OR expires_at > ?)
+        ORDER BY created_at ASC
+        """,
+        [workspace_id, *platforms, utc_now()],
+    )
+    rules_by_platform = {platform_id: [] for platform_id in platforms}
+    for row in rows:
+        rules_by_platform.setdefault(row["platform_id"], []).append(
+            {
+                "id": row["id"],
+                "platformId": row["platform_id"],
+                "listType": "block",
+                "userId": row["user_id"],
+                "label": row["label"],
+                "reason": row["reason"],
+                "expiresAt": row["expires_at"],
+            }
+        )
+    return rules_by_platform
+
+
 def default_policy(platform_id: str, updated_at: str | None = None) -> dict[str, Any]:
     policy = PlatformPolicyInput(
         enabled=True,
@@ -188,6 +227,15 @@ class PlatformService:
         )
         return [self._identity_row(row) for row in rows]
 
+    def list_active_block_rules(
+        self,
+        workspace_id: str,
+        platform_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        for platform_id in platform_ids:
+            self.ensure_platform(platform_id)
+        return load_active_block_rules(self.store, workspace_id, platform_ids)
+
     def create_identity_rule(
         self,
         workspace_id: str,
@@ -195,22 +243,6 @@ class PlatformService:
         payload: IdentityRuleInput,
     ) -> dict[str, Any]:
         self.ensure_platform(platform_id)
-        opposite = "block" if payload.listType == "allow" else "allow"
-        existing_opposite = self.store.query_one(
-            """
-            SELECT id FROM crawler_identity_rules
-            WHERE workspace_id = ? AND platform_id = ? AND list_type = ? AND user_id = ?
-            """,
-            (workspace_id, platform_id, opposite, payload.userId),
-        )
-        if existing_opposite:
-            raise ApiError(
-                "CONFLICT",
-                "User ID already exists in the opposite identity list",
-                status_code=409,
-                details={"userId": payload.userId, "oppositeListType": opposite},
-            )
-
         rule_id = new_id("identity")
         created_at = utc_now()
         try:

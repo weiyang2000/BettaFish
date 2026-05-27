@@ -57,14 +57,15 @@ def test_system_config_masks_secrets_and_ignores_mask_placeholder(client: TestCl
     assert _config_fields(client)["REPORT_ENGINE_API_KEY"]["value"] == "********"
 
 
-def test_identity_allow_block_conflict_and_delete(client: TestClient):
+def test_identity_duplicate_block_conflict_and_delete(client: TestClient):
     allow_response = client.post(
         "/api/v1/platforms/wb/identity-lists",
         headers=WORKSPACE_HEADERS,
-        json={"listType": "allow", "userId": "user-001", "label": "trusted"},
+        json={"userId": "user-001", "label": "spam"},
     )
     assert allow_response.status_code == 201
     rule_id = allow_response.json()["rule"]["id"]
+    assert allow_response.json()["rule"]["listType"] == "block"
 
     block_response = client.post(
         "/api/v1/platforms/wb/identity-lists",
@@ -75,7 +76,7 @@ def test_identity_allow_block_conflict_and_delete(client: TestClient):
     assert block_response.json()["error"]["code"] == "CONFLICT"
 
     list_response = client.get(
-        "/api/v1/platforms/wb/identity-lists?listType=allow",
+        "/api/v1/platforms/wb/identity-lists?listType=block",
         headers=WORKSPACE_HEADERS,
     )
     assert list_response.status_code == 200
@@ -86,6 +87,49 @@ def test_identity_allow_block_conflict_and_delete(client: TestClient):
         headers=WORKSPACE_HEADERS,
     )
     assert delete_response.status_code == 204
+
+
+def test_identity_allow_rules_remain_listable_but_are_not_crawler_filters(
+    client: TestClient,
+):
+    allow_response = client.post(
+        "/api/v1/platforms/xhs/identity-lists",
+        headers=WORKSPACE_HEADERS,
+        json={"listType": "allow", "userId": "same-user", "label": "legacy allow"},
+    )
+    assert allow_response.status_code == 201
+    assert allow_response.json()["rule"]["listType"] == "allow"
+
+    block_response = client.post(
+        "/api/v1/platforms/xhs/identity-lists",
+        headers=WORKSPACE_HEADERS,
+        json={"listType": "block", "userId": "same-user", "label": "active block"},
+    )
+    assert block_response.status_code == 201
+    assert block_response.json()["rule"]["listType"] == "block"
+
+    list_allow = client.get(
+        "/api/v1/platforms/xhs/identity-lists?listType=allow",
+        headers=WORKSPACE_HEADERS,
+    )
+    assert list_allow.status_code == 200
+    assert [rule["userId"] for rule in list_allow.json()["rules"]] == ["same-user"]
+
+    list_block = client.get(
+        "/api/v1/platforms/xhs/identity-lists?listType=block",
+        headers=WORKSPACE_HEADERS,
+    )
+    assert list_block.status_code == 200
+    assert [rule["userId"] for rule in list_block.json()["rules"]] == ["same-user"]
+
+    active_rules = client.app.state.platform_service.list_active_block_rules(
+        "workspace_test",
+        ["xhs", "wb"],
+    )
+    assert {
+        platform: [rule["userId"] for rule in rules]
+        for platform, rules in active_rules.items()
+    } == {"xhs": ["same-user"], "wb": []}
 
 
 def test_platform_policy_update_round_trip(client: TestClient):
